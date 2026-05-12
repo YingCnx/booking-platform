@@ -13,10 +13,10 @@ export default async function AdminPage() {
   const { data: todayBookings, error: bookingError } = await supabase
     .from('bookings')
     .select(`
-      id, start_time, end_time, status, total_price,
+      id, branch_id, start_time, end_time, status, total_price,
       customers ( name, phone ),
       services ( name ),
-      branches ( name )
+      branches ( id, name )
     `)
     .eq('booking_date', today)
     .neq('status', 'cancelled')
@@ -89,7 +89,7 @@ export default async function AdminPage() {
                 </div>
                 <div className="space-y-3">
                   {(pending as any[]).map((b) => (
-                    <Link key={b.id} href={`/admin/branches/${b.branches?.id ?? ''}`}
+                    <Link key={b.id} href={`/admin/branches/${b.branch_id ?? ''}`}
                       className="flex items-center justify-between border border-amber-800/60 bg-amber-950/20 hover:bg-amber-950/40 rounded-xl px-5 py-4 transition"
                     >
                       <div>

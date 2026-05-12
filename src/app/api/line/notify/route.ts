@@ -1,25 +1,26 @@
-// ==============================================
-// LINE Notify API — ส่งข้อความหาลูกค้า/admin
-// ==============================================
-
 import { NextResponse } from 'next/server'
-import { pushMessage, buildBookingPendingFlex, buildBookingConfirmedFlex, buildAdminNotifyFlex, buildReminderFlex } from '@/lib/line'
+import {
+  pushMessage,
+  buildBookingPendingFlex,
+  buildBookingConfirmedFlex,
+  buildAdminNotifyFlex,
+  buildReminderFlex,
+} from '@/lib/line'
 
 export async function POST(req: Request) {
   const { type, data } = await req.json()
 
-  // type: 'booking_pending' | 'booking_confirmed' | 'admin_notify' | 'reminder'
-
   try {
     if (type === 'booking_pending') {
-      // แจ้งลูกค้าว่าส่งคำขอสำเร็จ รอยืนยัน
+      // ✅ แจ้งลูกค้า (ถ้ามี line_user_id)
       if (data.lineUserId) {
         await pushMessage(data.lineUserId, [buildBookingPendingFlex(data)])
       }
 
-      // แจ้ง admin ว่ามีจองใหม่
-      if (process.env.LINE_ADMIN_USER_ID) {
-        await pushMessage(process.env.LINE_ADMIN_USER_ID, [buildAdminNotifyFlex(data)])
+      // ✅ แจ้ง admin group (ใช้ LINE_ADMIN_GROUP_ID แทน user ID)
+      const groupId = process.env.LINE_ADMIN_GROUP_ID
+      if (groupId) {
+        await pushMessage(groupId, [buildAdminNotifyFlex(data)])
       }
     }
 
@@ -31,7 +32,6 @@ export async function POST(req: Request) {
     }
 
     if (type === 'reminder') {
-      // แจ้งเตือนก่อนนัด — เรียกจาก cron job
       if (data.lineUserId) {
         await pushMessage(data.lineUserId, [buildReminderFlex(data)])
       }

@@ -1,10 +1,5 @@
-// ==============================================
-// LINE Messaging API utilities
-// ==============================================
-
 const LINE_API = 'https://api.line.me/v2/bot'
 
-// ส่งข้อความหา user คนเดียว
 export async function pushMessage(to: string, messages: object[]) {
   const res = await fetch(`${LINE_API}/message/push`, {
     method: 'POST',
@@ -14,14 +9,10 @@ export async function pushMessage(to: string, messages: object[]) {
     },
     body: JSON.stringify({ to, messages }),
   })
-  if (!res.ok) {
-    const err = await res.json()
-    console.error('LINE push error:', err)
-  }
+  if (!res.ok) console.error('LINE push error:', await res.json())
   return res.ok
 }
 
-// ส่ง reply (ใช้ replyToken จาก webhook)
 export async function replyMessage(replyToken: string, messages: object[]) {
   const res = await fetch(`${LINE_API}/message/reply`, {
     method: 'POST',
@@ -31,18 +22,96 @@ export async function replyMessage(replyToken: string, messages: object[]) {
     },
     body: JSON.stringify({ replyToken, messages }),
   })
-  if (!res.ok) {
-    const err = await res.json()
-    console.error('LINE reply error:', err)
-  }
+  if (!res.ok) console.error('LINE reply error:', await res.json())
   return res.ok
+}
+
+// URL admin ที่มี secret key ฝังอยู่
+function adminUrl(path = '') {
+  const base = process.env.NEXT_PUBLIC_SITE_URL ?? ''
+  const key  = process.env.ADMIN_SECRET_KEY ?? ''
+  return `${base}/admin${path}?key=${key}`
 }
 
 // ==============================================
 // Flex Message Templates
 // ==============================================
 
-// ส่งให้ลูกค้า — แจ้งว่าจองสำเร็จ รอยืนยัน
+// แจ้ง admin group — มีจองใหม่ (pending)
+export function buildAdminNotifyFlex(data: {
+  customerName: string
+  phone: string
+  serviceName: string
+  branchName: string
+  date: string
+  time: string
+  price: number
+  bookingId: string
+}) {
+  const dateLabel = new Date(data.date).toLocaleDateString('th-TH', {
+    weekday: 'short', day: 'numeric', month: 'short',
+  })
+
+  return {
+    type: 'flex',
+    altText: `🔔 จองใหม่! ${data.customerName} — ${data.serviceName} ${data.time} น.`,
+    contents: {
+      type: 'bubble',
+      size: 'giga',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#1e1b4b',
+        paddingAll: '16px',
+        contents: [
+          { type: 'text', text: '🔔 มีการจองใหม่ — รอยืนยัน', color: '#a5b4fc', size: 'sm', weight: 'bold' },
+          { type: 'text', text: data.customerName, color: '#ffffff', size: 'xl', weight: 'bold', margin: 'sm' },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '16px',
+        spacing: 'sm',
+        contents: [
+          infoRow('บริการ', data.serviceName),
+          infoRow('สาขา', data.branchName),
+          infoRow('วันที่', `${dateLabel} เวลา ${data.time} น.`),
+          infoRow('เบอร์', data.phone || '-'),
+          { type: 'separator', margin: 'md' },
+          {
+            type: 'box', layout: 'horizontal', margin: 'md',
+            contents: [
+              { type: 'text', text: 'ราคา', color: '#71717a', size: 'sm', flex: 1 },
+              { type: 'text', text: `฿${data.price}`, color: '#18181b', size: 'xl', weight: 'bold', align: 'end' },
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '12px',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#18181b',
+            action: {
+              type: 'uri',
+              label: '✓ เปิด Dashboard ยืนยัน',
+              // ✅ URL มี secret key ฝังอยู่ กดแล้วเข้าได้เลย
+              uri: adminUrl(),
+            },
+          },
+        ],
+      },
+    },
+  }
+}
+
+// แจ้งลูกค้า — รอยืนยัน
 export function buildBookingPendingFlex(data: {
   customerName: string
   serviceName: string
@@ -97,18 +166,14 @@ export function buildBookingPendingFlex(data: {
         paddingAll: '16px',
         backgroundColor: '#fefce8',
         contents: [
-          {
-            type: 'text',
-            text: 'ร้านจะแจ้งผลยืนยันให้ทราบโดยเร็ว',
-            color: '#92400e', size: 'sm', align: 'center',
-          },
+          { type: 'text', text: 'ร้านจะแจ้งผลยืนยันให้ทราบโดยเร็ว', color: '#92400e', size: 'sm', align: 'center' },
         ],
       },
     },
   }
 }
 
-// ส่งให้ลูกค้า — ร้าน confirm แล้ว
+// แจ้งลูกค้า — confirmed แล้ว
 export function buildBookingConfirmedFlex(data: {
   serviceName: string
   branchName: string
@@ -160,79 +225,7 @@ export function buildBookingConfirmedFlex(data: {
   }
 }
 
-// แจ้ง admin ใน LINE OA — มีจองใหม่
-export function buildAdminNotifyFlex(data: {
-  customerName: string
-  phone: string
-  serviceName: string
-  branchName: string
-  date: string
-  time: string
-  price: number
-  bookingId: string
-}) {
-  const dateLabel = new Date(data.date).toLocaleDateString('th-TH', {
-    weekday: 'short', day: 'numeric', month: 'short',
-  })
-
-  return {
-    type: 'flex',
-    altText: `🔔 จองใหม่! ${data.customerName} — ${data.serviceName}`,
-    contents: {
-      type: 'bubble',
-      size: 'giga',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: '#1e1b4b',
-        paddingAll: '16px',
-        contents: [
-          { type: 'text', text: '🔔 มีการจองใหม่', color: '#a5b4fc', size: 'sm' },
-          { type: 'text', text: data.customerName, color: '#ffffff', size: 'xl', weight: 'bold', margin: 'sm' },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        paddingAll: '16px',
-        spacing: 'sm',
-        contents: [
-          infoRow('บริการ', data.serviceName),
-          infoRow('สาขา', data.branchName),
-          infoRow('วันที่', `${dateLabel} · ${data.time} น.`),
-          infoRow('เบอร์', data.phone || '-'),
-          { type: 'separator', margin: 'md' },
-          {
-            type: 'box', layout: 'horizontal', margin: 'md',
-            contents: [
-              { type: 'text', text: 'ราคา', color: '#71717a', size: 'sm', flex: 1 },
-              { type: 'text', text: `฿${data.price}`, color: '#18181b', size: 'lg', weight: 'bold', align: 'end' },
-            ],
-          },
-        ],
-      },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        paddingAll: '12px',
-        contents: [
-          {
-            type: 'button',
-            style: 'primary',
-            color: '#18181b',
-            action: {
-              type: 'uri',
-              label: 'เปิด Admin จัดการ',
-              uri: `${process.env.NEXT_PUBLIC_SITE_URL}/admin`,
-            },
-          },
-        ],
-      },
-    },
-  }
-}
-
-// reminder แจ้งเตือนก่อนนัด
+// reminder ก่อนนัด 1 วัน
 export function buildReminderFlex(data: {
   customerName: string
   serviceName: string
@@ -281,7 +274,6 @@ export function buildReminderFlex(data: {
   }
 }
 
-// helper
 function infoRow(label: string, value: string) {
   return {
     type: 'box',
