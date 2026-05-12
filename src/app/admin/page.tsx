@@ -7,169 +7,192 @@ export default async function AdminPage() {
 
   const { data: branches, error: branchError } = await supabase
     .from('branches')
-    .select('id, name, open_time, close_time, slot_interval_minutes, booking_mode, max_parallel_bookings')
+    .select('id, name, open_time, close_time, slot_interval_minutes, booking_mode')
     .order('created_at')
 
-  const { data: todayBookings, error: bookingError } = await supabase
+  // ✅ ดึง pending ทุกวัน (ไม่กรองวันที่)
+  const { data: allPending } = await supabase
     .from('bookings')
     .select(`
-      id, branch_id, start_time, end_time, status, total_price,
+      id, branch_id, booking_date, start_time, total_price,
       customers ( name, phone ),
       services ( name ),
       branches ( id, name )
     `)
+    .eq('status', 'pending')
+    .gte('booking_date', today)   // ตั้งแต่วันนี้เป็นต้นไป ไม่เอาอดีต
+    .order('booking_date')
+    .order('start_time')
+
+  // ✅ ดึง confirmed วันนี้เท่านั้น
+  const { data: todayConfirmed } = await supabase
+    .from('bookings')
+    .select(`
+      id, branch_id, booking_date, start_time, end_time, total_price,
+      customers ( name, phone ),
+      services ( name ),
+      branches ( id, name )
+    `)
+    .eq('status', 'confirmed')
     .eq('booking_date', today)
-    .neq('status', 'cancelled')
     .order('start_time')
 
   if (branchError) console.error('branches error:', branchError)
-  if (bookingError) console.error('bookings error:', bookingError)
 
-  const pending   = todayBookings?.filter(b => b.status === 'pending') ?? []
-  const confirmed = todayBookings?.filter(b => b.status === 'confirmed') ?? []
-  const total     = todayBookings?.length ?? 0
+  const pending   = (allPending   ?? []) as any[]
+  const confirmed = (todayConfirmed ?? []) as any[]
+
+  function formatDate(dateStr: string) {
+    if (dateStr === today) return 'วันนี้'
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    if (dateStr === tomorrow.toISOString().split('T')[0]) return 'พรุ่งนี้'
+    return new Date(dateStr).toLocaleDateString('th-TH', {
+      weekday: 'short', day: 'numeric', month: 'short',
+    })
+  }
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="flex">
+      <header className="border-b border-gray-800 px-5 py-5 sticky top-0 z-10 bg-black">
+        <div className="text-xs text-gray-500 uppercase tracking-widest">Admin</div>
+        <h1 className="text-2xl font-bold mt-1">Dashboard</h1>
+      </header>
 
-        {/* SIDEBAR */}
-        <aside className="hidden lg:flex w-72 min-h-screen border-r border-gray-800 bg-gray-950 flex-col">
-          <div className="px-6 py-8 border-b border-gray-800">
-            <div className="text-xs uppercase tracking-[0.25em] text-gray-500">Booking SaaS</div>
-            <h1 className="text-2xl font-bold mt-3">Admin Panel</h1>
+      <div className="max-w-2xl mx-auto px-4 py-5 space-y-8">
+
+        {branchError && (
+          <div className="border border-red-800 bg-red-950/30 rounded-xl p-4 text-sm text-red-400">
+            {branchError.message}
           </div>
-          <nav className="flex-1 p-4 space-y-1">
-            {['Dashboard', 'Bookings', 'Branches', 'Customers'].map((item, i) => (
-              <div key={item} className={`px-4 py-3 rounded-lg text-sm transition ${
-                i === 0 ? 'bg-white text-black font-medium' : 'text-gray-400 hover:bg-gray-900 hover:text-white cursor-pointer'
-              }`}>{item}</div>
-            ))}
-          </nav>
-          <div className="p-6 border-t border-gray-800 text-sm text-gray-500">{today}</div>
-        </aside>
+        )}
 
-        {/* MAIN */}
-        <main className="flex-1 min-w-0">
-          <header className="border-b border-gray-800 px-6 lg:px-10 py-6">
-            <div className="text-sm text-gray-500">Overview</div>
-            <h2 className="text-3xl font-bold mt-1">Dashboard</h2>
-          </header>
-
-          <div className="max-w-7xl mx-auto px-6 lg:px-10 py-10 space-y-10">
-
-            {(branchError || bookingError) && (
-              <div className="border border-red-800 bg-red-950/30 rounded-xl p-5 text-sm text-red-400">
-                {branchError && <div>branches: {branchError.message}</div>}
-                {bookingError && <div>bookings: {bookingError.message}</div>}
-              </div>
-            )}
-
-            {/* STATS */}
-            <div className="grid gap-6 md:grid-cols-4">
-              <StatCard value={total} label="คิววันนี้" />
-              {/* pending มี highlight พิเศษ */}
-              <div className={`border rounded-xl p-6 ${pending.length > 0 ? 'border-amber-700 bg-amber-950/30' : 'border-gray-800 bg-gray-900'}`}>
-                <div className={`text-5xl font-bold ${pending.length > 0 ? 'text-amber-300' : 'text-white'}`}>{pending.length}</div>
-                <div className="text-gray-500 mt-3 text-sm">รอยืนยัน</div>
-                {pending.length > 0 && (
-                  <div className="mt-2 text-xs text-amber-500 animate-pulse">● ต้องดำเนินการ</div>
-                )}
-              </div>
-              <StatCard value={confirmed.length} label="ยืนยันแล้ว" />
-              <StatCard value={branches?.length ?? 0} label="สาขา" />
+        {/* STATS */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className={`rounded-xl p-4 border ${pending.length > 0 ? 'border-amber-700 bg-amber-950/30' : 'border-gray-800 bg-gray-900'}`}>
+            <div className={`text-3xl font-bold tabular-nums ${pending.length > 0 ? 'text-amber-300' : 'text-white'}`}>
+              {pending.length}
             </div>
-
-            {/* PENDING — แยก section ออกมาเลย */}
+            <div className="text-xs text-gray-500 mt-1.5 uppercase tracking-wider">รอยืนยัน</div>
             {pending.length > 0 && (
-              <section>
-                <div className="mb-4 flex items-center gap-3">
-                  <h3 className="text-xl font-bold">⏳ รอการยืนยัน</h3>
-                  <span className="bg-amber-500 text-black text-xs font-bold px-2.5 py-1 rounded-full">{pending.length}</span>
-                </div>
-                <div className="space-y-3">
-                  {(pending as any[]).map((b) => (
-                    <Link key={b.id} href={`/admin/branches/${b.branch_id ?? ''}`}
-                      className="flex items-center justify-between border border-amber-800/60 bg-amber-950/20 hover:bg-amber-950/40 rounded-xl px-5 py-4 transition"
-                    >
-                      <div>
-                        <div className="font-bold">{b.customers?.name}</div>
-                        <div className="text-sm text-gray-400 mt-0.5">
-                          {b.services?.name} · {b.start_time?.slice(0, 5)} · {b.branches?.name}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold text-amber-300">฿{b.total_price}</span>
-                        <span className="text-xs text-amber-500 border border-amber-700 px-3 py-1.5 rounded-full">ไปยืนยัน →</span>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </section>
+              <div className="mt-1.5 text-xs text-amber-500 animate-pulse">● ต้องดำเนินการ</div>
             )}
-
-            {/* TODAY'S QUEUE */}
-            <section>
-              <div className="mb-4">
-                <h3 className="text-xl font-bold">คิววันนี้</h3>
-                <p className="text-gray-500 text-sm mt-1">เฉพาะที่ยืนยันแล้ว</p>
-              </div>
-              {!confirmed.length ? (
-                <div className="border border-gray-800 bg-gray-900 rounded-xl p-10 text-center text-gray-500">
-                  ยังไม่มีคิวที่ยืนยันวันนี้
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {(confirmed as any[]).map((b) => (
-                    <div key={b.id} className="border border-gray-800 bg-gray-900 rounded-xl px-5 py-4 flex items-center gap-4">
-                      <span className="text-lg font-bold tabular-nums w-14">{b.start_time?.slice(0, 5)}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium">{b.customers?.name}</div>
-                        <div className="text-sm text-gray-500">{b.services?.name} · {b.branches?.name}</div>
-                      </div>
-                      <span className="text-sm font-bold text-gray-400">฿{b.total_price}</span>
-                      <span className="text-xs px-3 py-1 rounded-full border bg-emerald-950 text-emerald-400 border-emerald-800">ยืนยัน</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* BRANCHES */}
-            <section>
-              <div className="mb-4">
-                <h3 className="text-xl font-bold">สาขา</h3>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {branches?.map((branch: any) => (
-                  <Link key={branch.id} href={`/admin/branches/${branch.id}`}
-                    className="border border-gray-800 bg-gray-900 hover:bg-gray-800 rounded-xl p-6 transition group block"
-                  >
-                    <div className="text-lg font-semibold">{branch.name}</div>
-                    <div className="text-gray-400 mt-3 text-sm">
-                      {String(branch.open_time).slice(0, 5)} – {String(branch.close_time).slice(0, 5)}
-                    </div>
-                    <div className="text-gray-500 text-sm mt-1">{branch.slot_interval_minutes} นาที/slot · {branch.booking_mode}</div>
-                    <div className="mt-4 text-sm text-white flex items-center gap-1">
-                      จัดการสาขา <span className="group-hover:translate-x-1 transition-transform inline-block">→</span>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
-
           </div>
-        </main>
-      </div>
-    </div>
-  )
-}
+          <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
+            <div className="text-3xl font-bold tabular-nums text-emerald-400">{confirmed.length}</div>
+            <div className="text-xs text-gray-500 mt-1.5 uppercase tracking-wider">ยืนยันวันนี้</div>
+          </div>
+          <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
+            <div className="text-3xl font-bold tabular-nums">{branches?.length ?? 0}</div>
+            <div className="text-xs text-gray-500 mt-1.5 uppercase tracking-wider">สาขา</div>
+          </div>
+        </div>
 
-function StatCard({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="border border-gray-800 bg-gray-900 rounded-xl p-6">
-      <div className="text-5xl font-bold">{value}</div>
-      <div className="text-gray-500 mt-3 text-sm">{label}</div>
+        {/* PENDING — ทุกวัน */}
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <h2 className="text-lg font-bold">⏳ รอยืนยัน</h2>
+            {pending.length > 0 && (
+              <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full">
+                {pending.length}
+              </span>
+            )}
+          </div>
+
+          {!pending.length ? (
+            <div className="border border-gray-800 bg-gray-900 rounded-xl px-5 py-8 text-center text-gray-600 text-sm">
+              ไม่มีรายการรอยืนยัน
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {pending.map((b) => (
+                <Link key={b.id}
+                  href={`/admin/branches/${b.branch_id}?date=${b.booking_date}`}
+                  className="flex items-center gap-4 border border-amber-800/50 bg-amber-950/20 hover:bg-amber-950/40 rounded-xl px-4 py-4 transition active:scale-[0.99]"
+                >
+                  {/* วันที่ + เวลา */}
+                  <div className="flex-shrink-0 text-center w-16">
+                    <div className="text-xs text-amber-400 font-medium">
+                      {formatDate(b.booking_date)}
+                    </div>
+                    <div className="text-lg font-bold tabular-nums mt-0.5">
+                      {String(b.start_time).slice(0, 5)}
+                    </div>
+                  </div>
+
+                  {/* ข้อมูล */}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold truncate">{b.customers?.name}</div>
+                    <div className="text-sm text-gray-400 mt-0.5 truncate">
+                      {b.services?.name} · {b.branches?.name}
+                    </div>
+                  </div>
+
+                  {/* ราคา + arrow */}
+                  <div className="flex-shrink-0 text-right">
+                    <div className="text-sm font-bold text-amber-300">฿{b.total_price}</div>
+                    <div className="text-xs text-amber-600 mt-0.5">ยืนยัน →</div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* TODAY CONFIRMED */}
+        <section>
+          <h2 className="text-lg font-bold mb-4">✅ คิววันนี้</h2>
+
+          {!confirmed.length ? (
+            <div className="border border-gray-800 bg-gray-900 rounded-xl px-5 py-8 text-center text-gray-600 text-sm">
+              ยังไม่มีคิวที่ยืนยันวันนี้
+            </div>
+          ) : (
+            <div className="border border-gray-800 bg-gray-900 rounded-xl overflow-hidden divide-y divide-gray-800">
+              {confirmed.map((b) => (
+                <Link key={b.id}
+                  href={`/admin/branches/${b.branch_id}?date=${b.booking_date}`}
+                  className="flex items-center gap-4 px-4 py-3.5 hover:bg-gray-800 transition"
+                >
+                  <span className="text-base font-bold tabular-nums w-12 flex-shrink-0">
+                    {String(b.start_time).slice(0, 5)}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{b.customers?.name}</div>
+                    <div className="text-xs text-gray-500 truncate">{b.services?.name} · {b.branches?.name}</div>
+                  </div>
+                  <span className="text-sm font-bold text-gray-400 flex-shrink-0">฿{b.total_price}</span>
+                  <span className="text-xs px-2.5 py-1 rounded-full border bg-emerald-950 text-emerald-400 border-emerald-800 flex-shrink-0">
+                    ยืนยัน
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* BRANCHES */}
+        <section>
+          <h2 className="text-lg font-bold mb-4">สาขา</h2>
+          <div className="space-y-2">
+            {branches?.map((branch: any) => (
+              <Link key={branch.id} href={`/admin/branches/${branch.id}`}
+                className="flex items-center justify-between border border-gray-800 bg-gray-900 hover:bg-gray-800 rounded-xl px-5 py-4 transition group"
+              >
+                <div>
+                  <div className="font-semibold">{branch.name}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {String(branch.open_time).slice(0, 5)} – {String(branch.close_time).slice(0, 5)}
+                    {' · '}{branch.slot_interval_minutes} นาที/slot
+                  </div>
+                </div>
+                <span className="text-gray-600 group-hover:text-white transition">→</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+      </div>
     </div>
   )
 }
