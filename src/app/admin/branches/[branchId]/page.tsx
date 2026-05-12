@@ -5,53 +5,90 @@ import { WorkingHoursForm } from './WorkingHoursForm'
 
 type Props = {
   params: Promise<{ branchId: string }>
-  searchParams: Promise<{ date?: string }>
+  searchParams: Promise<{ tab?: string }>
 }
 
 export default async function BranchAdminPage({ params, searchParams }: Props) {
   const supabase = await createClient()
   const { branchId } = await params
-  const { date } = await searchParams
+  const { tab = 'bookings' } = await searchParams
 
   const today = new Date().toISOString().split('T')[0]
-  const selectedDate = date ?? today
 
   const { data: branch } = await supabase
     .from('branches').select('*').eq('id', branchId).single()
 
+  // ✅ ดึงทุก booking ตั้งแต่วันนี้เป็นต้นไป ไม่กรองวันที่
   const { data: rawBookings, error } = await supabase
     .from('bookings')
     .select(`
-      id, start_time, end_time, status, total_price, notes,
+      id, start_time, end_time, status, total_price, booking_date,
       customers ( name, phone ),
       services ( name, duration_minutes, price )
     `)
     .eq('branch_id', branchId)
-    .eq('booking_date', selectedDate)
+    .gte('booking_date', today)
+    .neq('status', 'cancelled')
+    .order('booking_date')
     .order('start_time')
 
-  const bookings = rawBookings?.map((b: any) => ({
+  const bookings = (rawBookings ?? []).map((b: any) => ({
     ...b,
     customers: Array.isArray(b.customers) ? b.customers[0] : b.customers,
     services:  Array.isArray(b.services)  ? b.services[0]  : b.services,
   }))
 
-  // ✅ ข้อ 2: แสดง 14 วัน (เมื่อวาน + 13 วันข้างหน้า) ไม่ใช่แค่วันนี้
-  const dates = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() + i - 1)
-    return d.toISOString().split('T')[0]
-  })
+  // ✅ group by booking_date
+  const grouped = bookings.reduce((acc: Record<string, typeof bookings>, b) => {
+    const d = b.booking_date
+    if (!acc[d]) acc[d] = []
+    acc[d].push(b)
+    return acc
+  }, {})
 
-  const pending   = bookings?.filter(b => b.status === 'pending').length   ?? 0
-  const confirmed = bookings?.filter(b => b.status === 'confirmed').length ?? 0
+  const sortedDates = Object.keys(grouped).sort()
+
+  const totalPending = bookings.filter(b => b.status === 'pending').length
+
+  function formatDateLabel(dateStr: string) {
+    if (dateStr === today) return 'วันนี้'
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    if (dateStr === tomorrow.toISOString().split('T')[0]) return 'พรุ่งนี้'
+    return new Date(dateStr).toLocaleDateString('th-TH', {
+      weekday: 'long', day: 'numeric', month: 'long',
+    })
+  }
+
+  const tabs = [
+    { key: 'bookings', label: '📋 คิว' },
+    { key: 'settings', label: '⚙️ ตั้งค่า' },
+  ]
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <header className="border-b border-gray-800 px-5 py-4 flex items-center gap-3 sticky top-0 z-10 bg-black">
-        <Link href="/admin" className="text-gray-500 text-sm hover:text-white transition">← Admin</Link>
-        <span className="text-gray-700">/</span>
-        <h1 className="font-bold truncate">{branch?.name}</h1>
+      <header className="border-b border-gray-800 px-5 py-4 sticky top-0 z-10 bg-black">
+        <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+          <Link href="/admin" className="hover:text-white transition">Admin</Link>
+          <span>/</span>
+          <span className="text-white font-medium">{branch?.name}</span>
+        </div>
+        <div className="flex gap-1 mt-3">
+          {tabs.map(t => (
+            <Link key={t.key}
+              href={`/admin/branches/${branchId}?tab=${t.key}`}
+              className={[
+                'px-4 py-2 rounded-lg text-sm font-medium transition',
+                tab === t.key ? 'bg-white text-black' : 'text-gray-400 hover:text-white hover:bg-gray-900',
+              ].join(' ')}
+            >
+              {t.label}
+            </Link>
+          ))}
+          <Link href={`/admin/branches/${branchId}/services`}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-900 transition">
+            🛠 บริการ
+          </Link>
+        </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-6">
@@ -62,48 +99,75 @@ export default async function BranchAdminPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {/* Date tabs — scroll แนวนอน */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 snap-x">
-          {dates.map(d => {
-            const isToday    = d === today
-            const isSelected = d === selectedDate
-            const isPast     = d < today
-            const label = new Date(d).toLocaleDateString('th-TH', {
-              weekday: 'short', day: 'numeric', month: 'short',
-            })
-            return (
-              <Link key={d}
-                href={`/admin/branches/${branchId}?date=${d}`}
-                className={[
-                  'flex-shrink-0 snap-start px-3 py-2 rounded-xl border text-xs whitespace-nowrap transition text-center min-w-[72px]',
-                  isSelected
-                    ? 'bg-white text-black border-white font-bold'
-                    : isPast
-                    ? 'border-gray-800 text-gray-600 bg-gray-900'
-                    : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white bg-gray-900',
-                ].join(' ')}
-              >
-                <div>{isToday ? 'วันนี้' : label.split(' ')[0]}</div>
-                <div className="opacity-70">{label.split(' ').slice(1).join(' ')}</div>
-              </Link>
-            )
-          })}
-        </div>
+        {/* TAB: BOOKINGS */}
+        {tab === 'bookings' && (
+          <>
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className={`rounded-xl p-4 border ${totalPending > 0 ? 'border-amber-700 bg-amber-950/30' : 'border-gray-800 bg-gray-900'}`}>
+                <div className={`text-3xl font-bold ${totalPending > 0 ? 'text-amber-300' : 'text-white'}`}>
+                  {totalPending}
+                </div>
+                <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">รอยืนยัน</div>
+                {totalPending > 0 && (
+                  <div className="mt-1.5 text-xs text-amber-500 animate-pulse">● ต้องดำเนินการ</div>
+                )}
+              </div>
+              <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
+                <div className="text-3xl font-bold">{bookings.length}</div>
+                <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">คิวทั้งหมด</div>
+              </div>
+            </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className={`rounded-xl p-4 border ${pending > 0 ? 'border-amber-700 bg-amber-950/30' : 'border-gray-800 bg-gray-900'}`}>
-            <div className={`text-3xl font-bold ${pending > 0 ? 'text-amber-300' : 'text-white'}`}>{pending}</div>
-            <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">รอยืนยัน</div>
-          </div>
-          <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
-            <div className="text-3xl font-bold text-emerald-400">{confirmed}</div>
-            <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">ยืนยันแล้ว</div>
-          </div>
-        </div>
+            {/* ✅ แสดงแยกตามวัน */}
+            {sortedDates.length === 0 ? (
+              <div className="border border-gray-800 bg-gray-900 rounded-xl px-5 py-10 text-center text-gray-600 text-sm">
+                ไม่มีคิวที่กำลังจะมาถึง
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {sortedDates.map(dateStr => {
+                  const dayBookings = grouped[dateStr]
+                  const dayPending  = dayBookings.filter((b: any) => b.status === 'pending').length
+                  const isToday     = dateStr === today
 
-        <BookingTable bookings={bookings as any ?? []} />
-        <WorkingHoursForm branch={branch} />
+                  return (
+                    <div key={dateStr}>
+                      {/* Date header */}
+                      <div className="flex items-center gap-3 mb-3">
+                        <h2 className={`font-bold text-base ${isToday ? 'text-white' : 'text-gray-300'}`}>
+                          {formatDateLabel(dateStr)}
+                        </h2>
+                        {dayPending > 0 && (
+                          <span className="bg-amber-500 text-black text-xs font-bold px-2 py-0.5 rounded-full">
+                            {dayPending} รอยืนยัน
+                          </span>
+                        )}
+                        <span className="text-xs text-gray-600 ml-auto">
+                          {dayBookings.length} คิว
+                        </span>
+                      </div>
+
+                      {/* Bookings ของวันนั้น */}
+                      <BookingTable bookings={dayBookings} />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* TAB: SETTINGS */}
+        {tab === 'settings' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-bold mb-1">ตั้งค่าสาขา</h2>
+              <p className="text-sm text-gray-500">เวลาเปิด-ปิด, ช่วง slot, วันหยุด</p>
+            </div>
+            <WorkingHoursForm branch={branch} />
+          </div>
+        )}
 
       </div>
     </div>
