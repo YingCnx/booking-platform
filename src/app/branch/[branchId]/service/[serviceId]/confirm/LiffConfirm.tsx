@@ -69,9 +69,19 @@ export function LiffConfirm({
           liffId,
         })
 
+       if (!window.liff.isInClient()) {
+
+      window.location.href =
+        `https://line.me/R/app/${liffId}`
+
+      return
+    }
+
         setIsInLine(
           window.liff.isInClient()
         )
+
+
 
         if (!window.liff.isLoggedIn()) {
 
