@@ -21,27 +21,52 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
   const [liffReady, setLiffReady] = useState(false)
   const [loading, setLoading]     = useState(false)
   const [isInLine, setIsInLine]   = useState(false)
+  const [initError, setInitError] = useState('')
 
   useEffect(() => {
-    const liffId = process.env.NEXT_PUBLIC_LIFF_ID
-    if (!liffId) { setLiffReady(true); return }
-
-    const script = document.createElement('script')
-    script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
-    script.onload = async () => {
+    async function initLiff() {
       try {
+        // ✅ ดึง liffId จาก DB ผ่าน API แทนการอ่านจาก env
+        const configRes = await fetch(`/api/shop-config?branchId=${branchId}`)
+        const config = await configRes.json()
+        const liffId = config.liffId
+
+        console.log('[LIFF] liffId from DB:', liffId)
+
+        if (!liffId) {
+          console.warn('[LIFF] no liffId configured for this shop')
+          setLiffReady(true)
+          return
+        }
+
+        // โหลด LIFF SDK
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
+          script.onload = () => resolve()
+          script.onerror = () => reject(new Error('Failed to load LIFF SDK'))
+          document.head.appendChild(script)
+        })
+
         await window.liff.init({ liffId })
+        console.log('[LIFF] init success, isInClient:', window.liff.isInClient())
+
         const inClient = window.liff.isInClient()
         setIsInLine(inClient)
 
         if (inClient) {
-          if (!window.liff.isLoggedIn()) { window.liff.login(); return }
+          if (!window.liff.isLoggedIn()) {
+            window.liff.login()
+            return
+          }
           const profile = await window.liff.getProfile()
           setName(profile.displayName)
           setAvatar(profile.pictureUrl ?? '')
           const token = window.liff.getIDToken()
+          console.log('[LIFF] getIDToken:', token ? 'got token' : 'null')
           if (token) setIdToken(token)
         } else {
+          // เปิดบน browser — ลอง login ถ้า logged in อยู่แล้ว
           if (window.liff.isLoggedIn()) {
             const profile = await window.liff.getProfile()
             setName(profile.displayName)
@@ -50,15 +75,16 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
             if (token) setIdToken(token)
           }
         }
-      } catch (err) {
-        console.error('LIFF init error:', err)
+      } catch (err: any) {
+        console.error('[LIFF] init error:', err)
+        setInitError(err?.message ?? 'LIFF error')
       } finally {
         setLiffReady(true)
       }
     }
-    script.onerror = () => setLiffReady(true)
-    document.head.appendChild(script)
-  }, [])
+
+    initLiff()
+  }, [branchId])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -72,7 +98,12 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
       formData.append('date', date)
       formData.append('name', name)
       formData.append('phone', phone)
-      if (idToken) formData.append('idToken', idToken)
+      if (idToken) {
+        formData.append('idToken', idToken)
+        console.log('[submit] sending idToken, length:', idToken.length)
+      } else {
+        console.warn('[submit] no idToken — LINE notify will not work')
+      }
 
       const res = await fetch('/api/booking/create', {
         method: 'POST',
@@ -80,16 +111,11 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
       })
 
       if (res.ok) {
-        // ✅ ข้อ 3: ปิด browser/LIFF ทันทีหลังจองสำเร็จ
         if (isInLine && window.liff?.closeWindow) {
           window.liff.closeWindow()
         } else {
-          // บน browser ปกติ — ปิด tab
           window.close()
-          // fallback ถ้าปิดไม่ได้ (browser block)
-          setTimeout(() => {
-            window.location.href = '/success?pending=true'
-          }, 300)
+          setTimeout(() => { window.location.href = '/success?pending=true' }, 300)
         }
       } else {
         const err = await res.json()
@@ -114,6 +140,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
+      {/* LINE badge */}
       {idToken && (
         <div className="flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
           {avatar && <img src={avatar} alt="" className="h-10 w-10 rounded-full object-cover" />}
@@ -148,6 +175,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
           เปิดผ่าน LINE เพื่อรับการแจ้งเตือนการจอง
         </p>
       )}
+
     </form>
   )
 }
