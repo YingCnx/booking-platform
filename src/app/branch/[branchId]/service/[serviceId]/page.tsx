@@ -7,6 +7,7 @@ type Props = {
 }
 
 function generateDates() {
+  // ✅ ข้อ 4: แค่ 7 วัน (วันนี้ถึง +6 วัน)
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date()
     d.setDate(d.getDate() + i)
@@ -17,7 +18,10 @@ function generateDates() {
 function formatDateShort(dateStr: string) {
   const d = new Date(dateStr)
   const isToday = dateStr === new Date().toISOString().split('T')[0]
-  if (isToday) return { top: 'วันนี้', bottom: d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) }
+  if (isToday) return {
+    top: 'วันนี้',
+    bottom: d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }),
+  }
   return {
     top: d.toLocaleDateString('th-TH', { weekday: 'short' }),
     bottom: d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }),
@@ -27,36 +31,40 @@ function formatDateShort(dateStr: string) {
 export default async function ServiceTimePage({ params, searchParams }: Props) {
   const { branchId, serviceId } = await params
   const { date } = await searchParams
-  const selectedDate = date ?? new Date().toISOString().split('T')[0]
+
+  const dates = generateDates()
+  const today = dates[0]
+
+  // ✅ ข้อ 4: ถ้าวันที่เลือกอยู่นอกช่วง 7 วัน ให้ใช้วันนี้แทน
+  const selectedDate = (date && dates.includes(date)) ? date : today
+
   const supabase = await createClient()
 
   const { data: service } = await supabase
     .from('services').select('*').eq('id', serviceId).single()
-
   const { data: branch } = await supabase
     .from('branches').select('*').eq('id', branchId).single()
 
-  // generate slots จาก working hours
-  const openTime = String(branch?.open_time ?? '09:00').slice(0, 5)
-  const closeTime = String(branch?.close_time ?? '18:00').slice(0, 5)
+  const openTime    = String(branch?.open_time  ?? '09:00').slice(0, 5)
+  const closeTime   = String(branch?.close_time ?? '18:00').slice(0, 5)
   const slotInterval = branch?.slot_interval_minutes ?? 30
-  const duration = service?.duration_minutes ?? 60
+  const duration    = service?.duration_minutes ?? 60
 
   const [oH, oM] = openTime.split(':').map(Number)
   const [cH, cM] = closeTime.split(':').map(Number)
-  const openTotal = oH * 60 + oM
+  const openTotal  = oH * 60 + oM
   const closeTotal = cH * 60 + cM
 
   const allTimes: string[] = []
   for (let t = openTotal; t + duration <= closeTotal; t += slotInterval) {
-    allTimes.push(`${Math.floor(t/60).toString().padStart(2,'0')}:${(t%60).toString().padStart(2,'0')}`)
+    allTimes.push(
+      `${Math.floor(t / 60).toString().padStart(2, '0')}:${(t % 60).toString().padStart(2, '0')}`
+    )
   }
 
-  // check holidays
   const holidays: string[] = branch?.holiday_dates ?? []
   const isClosed = holidays.includes(selectedDate)
 
-  // existing bookings ไม่รวม cancelled
   const { data: bookings } = await supabase
     .from('bookings')
     .select('start_time, end_time, status')
@@ -64,25 +72,37 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
     .eq('booking_date', selectedDate)
     .in('status', ['pending', 'confirmed'])
 
+  // ✅ ข้อ 4: คำนวณ current time สำหรับกัน past slots
+  const isToday = selectedDate === today
+  const now = new Date()
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+
   const slots = allTimes.map(time => {
     const [h, m] = time.split(':').map(Number)
-    const endMin = h * 60 + m + duration
-    const endTime = `${Math.floor(endMin/60).toString().padStart(2,'0')}:${(endMin%60).toString().padStart(2,'0')}`
-    const overlap = bookings?.filter(b =>
-      time < String(b.end_time).slice(0,5) && endTime > String(b.start_time).slice(0,5)
-    ).length ?? 0
-    let available = true
-    if (branch?.booking_mode === 'single' && overlap >= 1) available = false
-    if (branch?.booking_mode === 'capacity' && overlap >= (branch?.max_parallel_bookings ?? 1)) available = false
-    return { time, available }
-  })
+    const slotMinutes = h * 60 + m
+    const endMin  = slotMinutes + duration
+    const endTime = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`
 
-  const dates = generateDates()
+    // ✅ กัน slot ที่ผ่านไปแล้ว (เฉพาะวันนี้)
+    const isPast = isToday && slotMinutes <= currentMinutes
+
+    const overlap = bookings?.filter(b =>
+      time < String(b.end_time).slice(0, 5) &&
+      endTime > String(b.start_time).slice(0, 5)
+    ).length ?? 0
+
+    let available = !isPast
+    if (available) {
+      if (branch?.booking_mode === 'single' && overlap >= 1) available = false
+      if (branch?.booking_mode === 'capacity' && overlap >= (branch?.max_parallel_bookings ?? 1)) available = false
+    }
+
+    return { time, available, isPast }
+  })
 
   return (
     <main className="min-h-screen bg-gray-50">
 
-      {/* Header */}
       <div className="bg-white border-b sticky top-0 z-10">
         <div className="flex items-center gap-3 px-4 py-4">
           <Link href={`/branch/${branchId}`} className="text-gray-400 text-2xl leading-none">‹</Link>
@@ -95,7 +115,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
 
       <div className="max-w-lg mx-auto px-4 py-5 space-y-6">
 
-        {/* Date picker — horizontal scroll */}
+        {/* Date picker */}
         <div>
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">เลือกวัน</h2>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 snap-x">
@@ -103,7 +123,8 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
               const { top, bottom } = formatDateShort(d)
               const isSelected = selectedDate === d
               return (
-                <Link key={d} href={`/branch/${branchId}/service/${serviceId}?date=${d}`}
+                <Link key={d}
+                  href={`/branch/${branchId}/service/${serviceId}?date=${d}`}
                   className={[
                     'flex-shrink-0 snap-start flex flex-col items-center justify-center w-16 h-16 rounded-2xl border text-center transition',
                     isSelected
@@ -134,11 +155,11 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-2.5">
-              {slots.map(slot => (
+              {slots.map(slot =>
                 slot.available ? (
                   <Link key={slot.time}
                     href={`/branch/${branchId}/service/${serviceId}/confirm?time=${slot.time}&date=${selectedDate}`}
-                    className="bg-white border border-gray-200 rounded-2xl py-4 text-center text-sm font-semibold text-gray-800 active:bg-gray-900 active:text-white active:border-gray-900 transition"
+                    className="bg-white border border-gray-200 rounded-2xl py-4 text-center text-sm font-semibold text-gray-800 active:bg-gray-900 active:text-white transition"
                   >
                     {slot.time}
                   </Link>
@@ -147,10 +168,13 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
                     className="bg-gray-100 border border-gray-100 rounded-2xl py-4 text-center text-sm font-medium text-gray-300"
                   >
                     <div>{slot.time}</div>
-                    <div className="text-xs mt-0.5">เต็ม</div>
+                    {/* ✅ แสดง "ผ่านแล้ว" แทน "เต็ม" สำหรับ past slots */}
+                    <div className="text-xs mt-0.5">
+                      {slot.isPast ? 'ผ่านแล้ว' : 'เต็ม'}
+                    </div>
                   </div>
                 )
-              ))}
+              )}
             </div>
           )}
         </div>
