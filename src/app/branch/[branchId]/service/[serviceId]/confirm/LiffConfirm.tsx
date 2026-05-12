@@ -1,10 +1,5 @@
 'use client'
 
-// ==============================================
-// LIFF Client Component
-// Secure version using ID Token verification
-// ==============================================
-
 import { useEffect, useState } from 'react'
 
 declare global {
@@ -27,10 +22,12 @@ export function LiffConfirm({
   date,
 }: Props) {
 
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
+  const [name, setName] =
+    useState('')
 
-  // ใช้ idToken แทน lineUserId
+  const [phone, setPhone] =
+    useState('')
+
   const [idToken, setIdToken] =
     useState('')
 
@@ -58,7 +55,6 @@ export function LiffConfirm({
       return
     }
 
-    // โหลด LIFF SDK
     const script =
       document.createElement('script')
 
@@ -77,7 +73,6 @@ export function LiffConfirm({
           window.liff.isInClient()
         )
 
-        // บังคับ login
         if (!window.liff.isLoggedIn()) {
 
           window.liff.login()
@@ -85,7 +80,6 @@ export function LiffConfirm({
           return
         }
 
-        // ดึง profile
         const profile =
           await window.liff.getProfile()
 
@@ -97,7 +91,6 @@ export function LiffConfirm({
           profile.pictureUrl ?? ''
         )
 
-        // ✅ ดึง ID Token จริงจาก LINE
         const token =
           window.liff.getIDToken()
 
@@ -107,10 +100,7 @@ export function LiffConfirm({
 
       } catch (err) {
 
-        console.error(
-          'LIFF init error:',
-          err
-        )
+        console.error(err)
 
       } finally {
 
@@ -166,7 +156,6 @@ export function LiffConfirm({
         phone
       )
 
-      // ✅ ส่ง idToken แทน lineUserId
       if (idToken) {
 
         formData.append(
@@ -175,7 +164,6 @@ export function LiffConfirm({
         )
       }
 
-      // ส่งไป backend
       const res = await fetch(
         '/api/booking/create',
         {
@@ -186,7 +174,6 @@ export function LiffConfirm({
 
       if (res.ok) {
 
-        // ถ้าเปิดใน LINE app
         if (
           isInLine &&
           window.liff?.closeWindow
@@ -226,16 +213,15 @@ export function LiffConfirm({
     }
   }
 
-  // loading
   if (!liffReady) {
 
     return (
 
       <div className="flex flex-col items-center justify-center py-16 gap-3">
 
-        <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-gray-300 border-t-black rounded-full animate-spin" />
 
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-gray-500">
           กำลังโหลด...
         </p>
 
@@ -247,30 +233,30 @@ export function LiffConfirm({
 
     <form
       onSubmit={handleSubmit}
-      className="space-y-4"
+      className="space-y-5"
     >
 
-      {/* LINE profile badge */}
+      {/* LINE badge */}
       {idToken && (
 
-        <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
+        <div className="flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
 
           {avatar && (
 
             <img
               src={avatar}
               alt=""
-              className="w-9 h-9 rounded-full"
+              className="h-10 w-10 rounded-full object-cover"
             />
           )}
 
           <div>
 
-            <div className="text-xs text-green-700 font-medium">
+            <div className="text-xs font-medium text-green-700">
               เชื่อมต่อ LINE แล้ว
             </div>
 
-            <div className="text-sm text-green-900 font-semibold">
+            <div className="text-sm font-semibold text-green-900">
               {name}
             </div>
 
@@ -282,7 +268,7 @@ export function LiffConfirm({
       {/* name */}
       <div>
 
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+        <label className="mb-2 block text-sm font-medium text-gray-700">
           ชื่อ-นามสกุล
         </label>
 
@@ -294,7 +280,7 @@ export function LiffConfirm({
             setName(e.target.value)
           }
           placeholder="กรอกชื่อของคุณ"
-          className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:border-gray-400 transition"
+          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none"
         />
 
       </div>
@@ -302,7 +288,7 @@ export function LiffConfirm({
       {/* phone */}
       <div>
 
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+        <label className="mb-2 block text-sm font-medium text-gray-700">
           เบอร์โทรศัพท์
         </label>
 
@@ -315,7 +301,7 @@ export function LiffConfirm({
           }
           placeholder="0812345678"
           inputMode="numeric"
-          className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-sm bg-gray-50 focus:bg-white focus:outline-none focus:border-gray-400 transition"
+          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none"
         />
 
       </div>
@@ -326,7 +312,7 @@ export function LiffConfirm({
         disabled={
           loading || !idToken
         }
-        className="w-full rounded-2xl bg-gray-900 py-4 text-white font-bold text-base active:bg-gray-700 transition disabled:opacity-50 disabled:cursor-wait mt-2"
+        className="w-full rounded-2xl bg-black py-4 text-base font-bold text-white transition active:scale-[0.99] disabled:opacity-50"
       >
 
         {loading
