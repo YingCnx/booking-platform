@@ -22,6 +22,12 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
   const [loading, setLoading]     = useState(false)
   const [isInLine, setIsInLine]   = useState(false)
   const [initError, setInitError] = useState('')
+  const [debugLog, setDebugLog] = useState<string[]>([])
+
+  function log(msg: string) {
+    console.log('[LIFF]', msg)
+    setDebugLog(prev => [...prev, msg])
+  }
 
   useEffect(() => {
     async function initLiff() {
@@ -31,10 +37,10 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
         const config = await configRes.json()
         const liffId = config.liffId
 
-        console.log('[LIFF] liffId from DB:', liffId)
+        log(`liffId: ${liffId ?? 'null'}`)
 
         if (!liffId) {
-          console.warn('[LIFF] no liffId configured for this shop')
+          log('no liffId in DB')
           setLiffReady(true)
           return
         }
@@ -49,7 +55,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
         })
 
         await window.liff.init({ liffId })
-        console.log('[LIFF] init success, isInClient:', window.liff.isInClient())
+        log(`init OK, inClient: ${window.liff.isInClient()}`)
 
         const inClient = window.liff.isInClient()
         setIsInLine(inClient)
@@ -63,7 +69,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
           setName(profile.displayName)
           setAvatar(profile.pictureUrl ?? '')
           const token = window.liff.getIDToken()
-          console.log('[LIFF] getIDToken:', token ? 'got token' : 'null')
+          log(`getIDToken: ${token ? 'GOT TOKEN ✓' : 'null ✗'}`)
           if (token) setIdToken(token)
         } else {
           // เปิดบน browser — ลอง login ถ้า logged in อยู่แล้ว
@@ -76,7 +82,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
           }
         }
       } catch (err: any) {
-        console.error('[LIFF] init error:', err)
+        log(`ERROR: ${err?.message ?? err}`)
         setInitError(err?.message ?? 'LIFF error')
       } finally {
         setLiffReady(true)
@@ -140,7 +146,13 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
-      {/* LINE badge */}
+      {/* DEBUG BOX — ลบออกหลังแก้เสร็จ */}
+      <div className="bg-black text-green-400 rounded-xl p-3 text-xs font-mono space-y-1">
+        {debugLog.length === 0 && <div className="text-gray-500">รอ LIFF init...</div>}
+        {debugLog.map((msg, i) => <div key={i}>▶ {msg}</div>)}
+      </div>
+
+    {/* LINE badge */}
       {idToken && (
         <div className="flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
           {avatar && <img src={avatar} alt="" className="h-10 w-10 rounded-full object-cover" />}
