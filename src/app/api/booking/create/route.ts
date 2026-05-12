@@ -14,10 +14,17 @@ async function verifyLineIdToken(idToken: string, channelId: string): Promise<st
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ id_token: idToken, client_id: channelId }),
     })
-    if (!res.ok) return null
     const data = await res.json()
+
+    // ✅ debug log ดูผลจาก LINE
+    console.log('[verify idToken] status:', res.status, 'body:', JSON.stringify(data))
+
+    if (!res.ok) return null
     return data.sub ?? null
-  } catch { return null }
+  } catch (err) {
+    console.error('[verify idToken] exception:', err)
+    return null
+  }
 }
 
 export async function POST(req: Request) {
@@ -32,6 +39,9 @@ export async function POST(req: Request) {
   const phone       = form.get('phone') as string
   const idToken     = form.get('idToken') as string | null
 
+  // ✅ debug log ดูว่า idToken ส่งมาไหม
+  console.log('[booking/create] idToken present:', !!idToken, 'length:', idToken?.length ?? 0)
+
   if (!branchId || !serviceId || !time || !bookingDate || !name)
     return NextResponse.json({ message: 'ข้อมูลไม่ครบถ้วน' }, { status: 400 })
 
@@ -39,19 +49,22 @@ export async function POST(req: Request) {
   const { data: branch }  = await supabase.from('branches').select('*').eq('id', branchId).single()
   if (!service || !branch) return NextResponse.json({ message: 'ไม่พบข้อมูล' }, { status: 404 })
 
-  // ดึง shop เพื่อเอา LINE channel_id สำหรับ verify
   const { data: shop } = await supabase
     .from('shops').select('id, line_channel_id').eq('id', branch.shop_id).single()
 
-  // verify idToken ด้วย channel_id ของร้านนั้น
+  // ✅ debug log ดูว่าเจอ shop และ channel_id ไหม
+  console.log('[booking/create] shop_id:', branch.shop_id, 'line_channel_id:', shop?.line_channel_id ?? 'NULL')
+
   let lineUserId: string | null = null
   if (idToken && shop?.line_channel_id) {
     lineUserId = await verifyLineIdToken(idToken, shop.line_channel_id)
+    console.log('[booking/create] lineUserId after verify:', lineUserId)
+  } else {
+    console.log('[booking/create] skip verify — idToken:', !!idToken, 'channel_id:', !!shop?.line_channel_id)
   }
 
   const endTime = addMinutes(time, service.duration_minutes)
 
-  // overlap check
   const { data: existing } = await supabase
     .from('bookings').select('start_time, end_time')
     .eq('branch_id', branchId).eq('booking_date', bookingDate)
@@ -66,7 +79,6 @@ export async function POST(req: Request) {
   if (branch.booking_mode === 'capacity' && overlapping >= branch.max_parallel_bookings)
     return NextResponse.json({ message: 'เวลานี้เต็มแล้ว' }, { status: 409 })
 
-  // upsert customer
   let customer: any = null
   if (phone) {
     const { data: c } = await supabase.from('customers').select('*')
@@ -99,7 +111,6 @@ export async function POST(req: Request) {
     duration_minutes: service.duration_minutes, price: service.price,
   })
 
-  // ✅ ส่ง shopId ไปด้วยเพื่อให้ใช้ LINE credentials ถูกร้าน
   try {
     await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/line/notify`, {
       method: 'POST',
@@ -108,10 +119,10 @@ export async function POST(req: Request) {
         type: 'booking_pending',
         shopId: shop?.id,
         data: {
-          bookingId:    booking.id,
-          lineUserId:   customer.line_user_id ?? null,
+          bookingId: booking.id,
+          lineUserId: customer.line_user_id ?? null,
           customerName: name, phone: phone ?? '',
-          serviceName:  service.name, branchName: branch.name,
+          serviceName: service.name, branchName: branch.name,
           date: bookingDate, time, price: service.price,
         },
       }),
