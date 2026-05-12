@@ -125,7 +125,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
       )}
 
       <div>
-        <label className="mb-2 block text-sm font-medium text-gray-900">ชื่อ-นามสกุล</label>
+        <label className="mb-2 block text-sm font-medium text-gray-900">ชื่อ</label>
         <input type="text" required value={name} onChange={e => setName(e.target.value)}
           placeholder="กรอกชื่อของคุณ"
           className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none" />
