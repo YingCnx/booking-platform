@@ -34,6 +34,10 @@ export function BookingTable({ bookings: initial }: { bookings: Booking[] }) {
   const [loading, setLoading] = useState<string | null>(null)
 
   async function updateStatus(bookingId: string, status: string) {
+    if (!bookingId) {
+      console.error('updateStatus: bookingId is undefined')
+      return
+    }
     setLoading(bookingId)
     try {
       const res = await fetch('/api/admin/booking-status', {
@@ -45,6 +49,10 @@ export function BookingTable({ bookings: initial }: { bookings: Booking[] }) {
         setBookings(prev =>
           prev.map(b => b.id === bookingId ? { ...b, status } : b)
         )
+      } else {
+        const err = await res.json()
+        console.error('updateStatus error:', err)
+        alert('เกิดข้อผิดพลาด: ' + (err.error ?? 'ไม่สามารถเปลี่ยนสถานะได้'))
       }
     } finally {
       setLoading(null)
