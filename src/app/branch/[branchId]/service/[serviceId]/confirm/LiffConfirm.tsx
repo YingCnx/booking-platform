@@ -14,16 +14,18 @@ type Props = {
 }
 
 export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
-  const [name, setName]       = useState('')
-  const [phone, setPhone]     = useState('')
-  const [idToken, setIdToken] = useState('')   // ✅ เก็บ idToken แทน lineUserId
-  const [avatar, setAvatar]   = useState('')
+  const [name, setName]           = useState('')
+  const [phone, setPhone]         = useState('')
+  const [idToken, setIdToken]     = useState('')
+  const [avatar, setAvatar]       = useState('')
   const [liffReady, setLiffReady] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [isInLine, setIsInLine] = useState(false)
+  const [loading, setLoading]     = useState(false)
+  const [isInLine, setIsInLine]   = useState(false)
 
   useEffect(() => {
     const liffId = process.env.NEXT_PUBLIC_LIFF_ID
+
+    // ไม่มี LIFF_ID → เปิด form ธรรมดาได้เลย
     if (!liffId) {
       setLiffReady(true)
       return
@@ -31,6 +33,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
 
     const script = document.createElement('script')
     script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
+
     script.onload = async () => {
       try {
         await window.liff.init({ liffId })
@@ -38,18 +41,30 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
         const inClient = window.liff.isInClient()
         setIsInLine(inClient)
 
-        if (!window.liff.isLoggedIn()) {
-          window.liff.login()
-          return
+        if (inClient) {
+          // เปิดใน LINE app — login อัตโนมัติเสมอ
+          if (!window.liff.isLoggedIn()) {
+            window.liff.login()
+            return
+          }
+          const profile = await window.liff.getProfile()
+          setName(profile.displayName)
+          setAvatar(profile.pictureUrl ?? '')
+          const token = window.liff.getIDToken()
+          if (token) setIdToken(token)
+
+        } else {
+          // เปิดบน browser ปกติ → ไม่ redirect ออก
+          // แค่เปิด form ให้กรอกเองได้เลย (ไม่มี LINE token)
+          if (window.liff.isLoggedIn()) {
+            const profile = await window.liff.getProfile()
+            setName(profile.displayName)
+            setAvatar(profile.pictureUrl ?? '')
+            const token = window.liff.getIDToken()
+            if (token) setIdToken(token)
+          }
+          // ไม่ login() เพราะจะ redirect ออกไป LINE แล้วกลับมาหน้าแรก
         }
-
-        const profile = await window.liff.getProfile()
-        setName(profile.displayName)
-        setAvatar(profile.pictureUrl ?? '')
-
-        // ✅ ดึง idToken — ใช้ verify ฝั่ง server แทนการส่ง userId ตรงๆ
-        const token = window.liff.getIDToken()
-        if (token) setIdToken(token)
 
       } catch (err) {
         console.error('LIFF init error:', err)
@@ -57,6 +72,12 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
         setLiffReady(true)
       }
     }
+
+    script.onerror = () => {
+      // โหลด SDK ไม่ได้ → เปิด form ธรรมดา
+      setLiffReady(true)
+    }
+
     document.head.appendChild(script)
   }, [])
 
@@ -72,7 +93,6 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
       formData.append('date', date)
       formData.append('name', name)
       formData.append('phone', phone)
-      // ✅ ส่ง idToken ให้ server verify เอง
       if (idToken) formData.append('idToken', idToken)
 
       const res = await fetch('/api/booking/create', {
@@ -81,7 +101,6 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
       })
 
       if (res.ok) {
-        // ✅ Bug 3 fix: closeWindow ก่อน redirect เสมอเมื่ออยู่ใน LINE
         if (isInLine && window.liff?.closeWindow) {
           window.liff.closeWindow()
         } else {
@@ -110,7 +129,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
-      {/* LINE badge — แสดงเมื่อได้ idToken แล้ว */}
+      {/* LINE badge */}
       {idToken && (
         <div className="flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
           {avatar && (
@@ -145,16 +164,16 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
 
       <button
         type="submit"
-        disabled={loading || !idToken}
+        disabled={loading}
         className="w-full rounded-2xl bg-black py-4 text-base font-bold text-white transition active:scale-[0.99] disabled:opacity-50"
       >
         {loading ? 'กำลังส่ง...' : 'ส่งคำขอจอง'}
       </button>
 
-      {/* fallback — กรณีเปิดนอก LINE (ไม่มี idToken) */}
-      {!idToken && liffReady && (
-        <p className="text-center text-xs text-gray-400">
-          กรุณาเปิดผ่าน LINE เพื่อจองคิว
+      {/* แจ้งเตือนกรณีเปิดนอก LINE */}
+      {!idToken && !isInLine && liffReady && (
+        <p className="text-center text-xs text-amber-500">
+          เปิดผ่าน LINE เพื่อรับการแจ้งเตือนการจอง
         </p>
       )}
 
