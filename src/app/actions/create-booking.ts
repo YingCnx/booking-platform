@@ -25,36 +25,93 @@ function addMinutes(
     .slice(0, 5)
 }
 
-// verify token กับ LINE
+// ==============================================
+// VERIFY LINE ID TOKEN
+// ==============================================
+
 async function verifyLineToken(
   idToken: string
 ) {
 
-  const response = await fetch(
-    'https://api.line.me/oauth2/v2.1/verify',
-    {
-      method: 'POST',
+  try {
 
-      headers: {
-        'Content-Type':
-          'application/x-www-form-urlencoded',
-      },
+    const response = await fetch(
+      'https://api.line.me/oauth2/v2.1/verify',
+      {
+        method: 'POST',
 
-      body: new URLSearchParams({
-        id_token: idToken,
+        headers: {
+          'Content-Type':
+            'application/x-www-form-urlencoded',
+        },
 
-        client_id:
-          process.env.NEXT_PUBLIC_LIFF_ID!,
-      }),
+        body: new URLSearchParams({
+          id_token: idToken,
+
+          client_id:
+            process.env
+              .NEXT_PUBLIC_LIFF_ID!,
+        }),
+      }
+    )
+
+    if (!response.ok) {
+      return null
     }
-  )
 
-  if (!response.ok) {
+    return response.json()
+
+  } catch (err) {
+
+    console.error(
+      'LINE verify error:',
+      err
+    )
+
     return null
   }
-
-  return response.json()
 }
+
+// ==============================================
+// SEND LINE NOTIFY
+// ==============================================
+
+async function sendLineNotify(
+  type: string,
+  data: object
+) {
+
+  try {
+
+    await fetch(
+      `${process.env.NEXT_PUBLIC_SITE_URL}/api/line/notify`,
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json',
+        },
+
+        body: JSON.stringify({
+          type,
+          data,
+        }),
+      }
+    )
+
+  } catch (err) {
+
+    console.error(
+      'LINE notify failed:',
+      err
+    )
+  }
+}
+
+// ==============================================
+// CREATE BOOKING
+// ==============================================
 
 export async function createBooking(
   formData: FormData
@@ -62,6 +119,10 @@ export async function createBooking(
 
   const supabase =
     await createClient()
+
+  // ============================================
+  // FORM DATA
+  // ============================================
 
   const branchId =
     formData.get('branchId') as string
@@ -81,13 +142,18 @@ export async function createBooking(
   const phone =
     formData.get('phone') as string
 
+  // ✅ รับ idToken แทน lineUserId
   const idToken =
     formData.get('idToken') as string
 
-  // ต้อง login LINE เท่านั้น
+  // ============================================
+  // VERIFY LINE TOKEN
+  // ============================================
+
   const profile =
     await verifyLineToken(idToken)
 
+  // ถ้า verify ไม่ผ่าน
   if (!profile?.sub) {
 
     redirect(
@@ -95,8 +161,13 @@ export async function createBooking(
     )
   }
 
-  // line user id จริง
-  const lineUserId = profile.sub
+  // ✅ LINE USER ID จริง
+  const lineUserId =
+    profile.sub
+
+  // ============================================
+  // VALIDATE
+  // ============================================
 
   if (
     !branchId ||
@@ -107,11 +178,14 @@ export async function createBooking(
   ) {
 
     redirect(
-      '/error?message=ข้อมูลไม่ครบ'
+      '/error?message=ข้อมูลไม่ครบถ้วน'
     )
   }
 
-  // service
+  // ============================================
+  // GET SERVICE
+  // ============================================
+
   const { data: service } =
     await supabase
       .from('services')
@@ -126,7 +200,10 @@ export async function createBooking(
     )
   }
 
-  // branch
+  // ============================================
+  // GET BRANCH
+  // ============================================
+
   const { data: branch } =
     await supabase
       .from('branches')
@@ -141,15 +218,23 @@ export async function createBooking(
     )
   }
 
+  // ============================================
+  // CALCULATE END TIME
+  // ============================================
+
   const endTime =
     addMinutes(
       time,
       service.duration_minutes
     )
 
-  // overlap
+  // ============================================
+  // CHECK OVERLAP
+  // ============================================
+
   const {
-    data: existingBookings
+    data: existingBookings,
+    error: existingError,
   } = await supabase
     .from('bookings')
     .select(`
@@ -163,6 +248,13 @@ export async function createBooking(
       'pending',
       'confirmed',
     ])
+
+  if (existingError) {
+
+    redirect(
+      '/error?message=ไม่สามารถตรวจสอบคิวได้'
+    )
+  }
 
   const overlapping =
     existingBookings?.filter(
@@ -179,6 +271,7 @@ export async function createBooking(
             .slice(0, 5)
     ).length ?? 0
 
+  // single mode
   if (
     branch.booking_mode === 'single'
     &&
@@ -190,6 +283,7 @@ export async function createBooking(
     )
   }
 
+  // capacity mode
   if (
     branch.booking_mode === 'capacity'
     &&
@@ -202,7 +296,10 @@ export async function createBooking(
     )
   }
 
-  // customer
+  // ============================================
+  // UPSERT CUSTOMER
+  // ============================================
+
   let customer: any = null
 
   if (phone) {
@@ -218,12 +315,14 @@ export async function createBooking(
         .eq('phone', phone)
         .maybeSingle()
 
+    // existing customer
     if (existing) {
 
       customer = existing
 
       // update line id
       if (
+        lineUserId &&
         !existing.line_user_id
       ) {
 
@@ -231,7 +330,7 @@ export async function createBooking(
           .from('customers')
           .update({
             line_user_id:
-              lineUserId
+              lineUserId,
           })
           .eq(
             'id',
@@ -249,7 +348,7 @@ export async function createBooking(
 
     const {
       data: newCustomer,
-      error: customerError
+      error: customerError,
     } = await supabase
       .from('customers')
       .insert({
@@ -273,21 +372,25 @@ export async function createBooking(
     ) {
 
       redirect(
-        '/error?message=สร้างลูกค้าไม่สำเร็จ'
+        '/error?message=ไม่สามารถบันทึกลูกค้าได้'
       )
     }
 
     customer = newCustomer
   }
 
-  // create booking
+  // ============================================
+  // CREATE BOOKING
+  // ============================================
+
   const {
     data: booking,
-    error: bookingError
+    error: bookingError,
   } = await supabase
     .from('bookings')
     .insert({
-      branch_id: branchId,
+      branch_id:
+        branchId,
 
       customer_id:
         customer.id,
@@ -298,11 +401,15 @@ export async function createBooking(
       booking_date:
         bookingDate,
 
-      start_time: time,
+      start_time:
+        time,
 
-      end_time: endTime,
+      end_time:
+        endTime,
 
-      status: 'pending',
+      // รอร้านยืนยัน
+      status:
+        'pending',
 
       total_price:
         service.price,
@@ -311,20 +418,22 @@ export async function createBooking(
     .single()
 
   if (
-    bookingError
-    ||
+    bookingError ||
     !booking
   ) {
 
     redirect(
       `/error?message=${encodeURIComponent(
         bookingError?.message ??
-        'booking failed'
+        'ไม่สามารถสร้าง booking ได้'
       )}`
     )
   }
 
-  // booking services
+  // ============================================
+  // BOOKING SERVICES
+  // ============================================
+
   await supabase
     .from('booking_services')
     .insert({
@@ -340,6 +449,44 @@ export async function createBooking(
       price:
         service.price,
     })
+
+  // ============================================
+  // SEND LINE NOTIFY
+  // ============================================
+
+  await sendLineNotify(
+    'booking_pending',
+    {
+      bookingId:
+        booking.id,
+
+      lineUserId,
+
+      customerName:
+        name,
+
+      phone:
+        phone ?? '',
+
+      serviceName:
+        service.name,
+
+      branchName:
+        branch.name,
+
+      date:
+        bookingDate,
+
+      time,
+
+      price:
+        service.price,
+    }
+  )
+
+  // ============================================
+  // SUCCESS
+  // ============================================
 
   redirect(
     '/success?pending=true'
