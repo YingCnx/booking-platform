@@ -56,7 +56,12 @@ export default async function AdminPage() {
     <div className="min-h-screen bg-black text-white">
       <header className="border-b border-gray-800 px-5 py-5 sticky top-0 z-10 bg-black">
         <div className="text-xs text-gray-500 uppercase tracking-widest">Admin</div>
-        <h1 className="text-2xl font-bold mt-1">Dashboard</h1>
+        <div className="flex items-center justify-between mt-1">
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <a href="/admin/shops" className="text-xs border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+            + จัดการร้าน
+          </a>
+        </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-8">

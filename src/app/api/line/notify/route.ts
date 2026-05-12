@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import {
+  getShopLineCredentials,
   pushMessage,
   buildBookingPendingFlex,
   buildBookingConfirmedFlex,
@@ -8,32 +9,40 @@ import {
 } from '@/lib/line'
 
 export async function POST(req: Request) {
-  const { type, data } = await req.json()
+  const { type, data, shopId } = await req.json()
+
+  if (!shopId) {
+    return NextResponse.json({ error: 'shopId required' }, { status: 400 })
+  }
+
+  // ✅ ดึง LINE credentials ของร้านนั้น
+  const creds = await getShopLineCredentials(shopId)
+
+  if (!creds.accessToken) {
+    return NextResponse.json({ error: 'LINE not configured for this shop' }, { status: 400 })
+  }
 
   try {
     if (type === 'booking_pending') {
-      // ✅ แจ้งลูกค้า (ถ้ามี line_user_id)
+      // แจ้งลูกค้า
       if (data.lineUserId) {
-        await pushMessage(data.lineUserId, [buildBookingPendingFlex(data)])
+        await pushMessage(data.lineUserId, [buildBookingPendingFlex(data)], creds.accessToken)
       }
-
-      // ✅ แจ้ง admin group (ใช้ LINE_ADMIN_GROUP_ID แทน user ID)
-      const groupId = process.env.LINE_ADMIN_GROUP_ID
-      if (groupId) {
-        await pushMessage(groupId, [buildAdminNotifyFlex(data)])
+      // แจ้ง admin group ของร้านนั้น
+      if (creds.adminGroupId) {
+        await pushMessage(creds.adminGroupId, [buildAdminNotifyFlex(data)], creds.accessToken)
       }
     }
 
     if (type === 'booking_confirmed') {
-      // แจ้งลูกค้าว่า confirmed แล้ว
       if (data.lineUserId) {
-        await pushMessage(data.lineUserId, [buildBookingConfirmedFlex(data)])
+        await pushMessage(data.lineUserId, [buildBookingConfirmedFlex(data)], creds.accessToken)
       }
     }
 
     if (type === 'reminder') {
       if (data.lineUserId) {
-        await pushMessage(data.lineUserId, [buildReminderFlex(data)])
+        await pushMessage(data.lineUserId, [buildReminderFlex(data)], creds.accessToken)
       }
     }
 
