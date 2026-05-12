@@ -100,15 +100,35 @@ export async function createBooking(formData: FormData) {
     }
   }
 
-  if (!customer) {
-    const { data: newCustomer, error: customerError } = await supabase
-      .from('customers')
-      .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId ?? null })
-      .select().single()
-    if (customerError || !newCustomer)
-      redirect('/error?message=ไม่สามารถบันทึกข้อมูลลูกค้าได้')
-    customer = newCustomer
+if (!customer) {
+  const { data: newCustomer, error: customerError } = await supabase
+    .from('customers')
+    .insert({
+      shop_id: branch.shop_id,
+      name,
+      phone,
+      line_user_id: lineUserId ?? null
+    })
+    .select()
+    .single()
+
+  console.log('[customer insert]')
+  console.log('lineUserId:', lineUserId)
+  console.log('newCustomer:', newCustomer)
+  console.log('customerError:', customerError)
+
+  if (customerError || !newCustomer) {
+    console.error('[customer insert failed]', customerError)
+
+    redirect(
+      `/error?message=${encodeURIComponent(
+        customerError?.message ?? 'ไม่สามารถบันทึกข้อมูลลูกค้าได้'
+      )}`
+    )
   }
+
+  customer = newCustomer
+}
 
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
@@ -123,16 +143,20 @@ export async function createBooking(formData: FormData) {
       total_price:  service.price,
     })
     .select().single()
+console.log('[booking insert]')
+console.log('booking:', booking)
+console.log('bookingError:', bookingError)
+    
 
-  if (bookingError || !booking)
-    redirect(`/error?message=${encodeURIComponent(bookingError?.message ?? 'ไม่สามารถสร้าง booking ได้')}`)
+if (bookingError || !booking) {
+  console.error('[booking insert failed]', bookingError)
 
-  await supabase.from('booking_services').insert({
-    booking_id:       booking.id,
-    service_id:       serviceId,
-    duration_minutes: service.duration_minutes,
-    price:            service.price,
-  })
+  redirect(
+    `/error?message=${encodeURIComponent(
+      bookingError?.message ?? 'ไม่สามารถสร้าง booking ได้'
+    )}`
+  )
+}
 
   // ส่ง LINE notify พร้อม shopId
   try {
