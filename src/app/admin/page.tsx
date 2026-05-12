@@ -16,7 +16,7 @@ export default async function AdminPage() {
       id, start_time, end_time, status, total_price,
       customers ( name, phone ),
       services ( name ),
-      branches ( name )
+      branches (id,name)
     `)
     .eq('booking_date', today)
     .neq('status', 'cancelled')
