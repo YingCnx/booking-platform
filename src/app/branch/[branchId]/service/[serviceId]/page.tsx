@@ -313,7 +313,9 @@ export default async function ServiceTimePage({
                 slot.available ? (
                   <Link
                     key={slot.time}
-                    href={`/branch/${branchId}/service/${serviceId}/confirm?time=${slot.time}&date=${selectedDate}`}
+                    href={`/confirm-liff?redirect=${encodeURIComponent(
+                      `/branch/${branchId}/service/${serviceId}/confirm?time=${slot.time}&date=${selectedDate}`
+                    )}`}
                     className="bg-white border border-gray-200 rounded-2xl py-4 text-center text-sm font-semibold text-gray-800 active:bg-gray-900 active:text-white transition"
                   >
                     {slot.time}
