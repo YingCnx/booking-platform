@@ -46,13 +46,25 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
         }
 
         // โหลด LIFF SDK
+        if (!window.liff) {
         await new Promise<void>((resolve, reject) => {
+          const existing = document.querySelector(
+            'script[src="https://static.line-scdn.net/liff/edge/2/sdk.js"]'
+          )
+
+          if (existing) {
+            resolve()
+            return
+          }
+
           const script = document.createElement('script')
           script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js'
           script.onload = () => resolve()
           script.onerror = () => reject(new Error('Failed to load LIFF SDK'))
+
           document.head.appendChild(script)
         })
+      }
 
         await window.liff.init({ liffId })
         log(`init OK, inClient: ${window.liff.isInClient()}`)
@@ -72,14 +84,7 @@ export function LiffConfirm({ branchId, serviceId, time, date }: Props) {
           log(`getIDToken: ${token ? 'GOT TOKEN ✓' : 'null ✗'}`)
           if (token) setIdToken(token)
         } else {
-          // เปิดบน browser — ลอง login ถ้า logged in อยู่แล้ว
-          if (window.liff.isLoggedIn()) {
-            const profile = await window.liff.getProfile()
-            setName(profile.displayName)
-            setAvatar(profile.pictureUrl ?? '')
-            const token = window.liff.getIDToken()
-            if (token) setIdToken(token)
-          }
+          log('not in LINE client')
         }
       } catch (err: any) {
         log(`ERROR: ${err?.message ?? err}`)
