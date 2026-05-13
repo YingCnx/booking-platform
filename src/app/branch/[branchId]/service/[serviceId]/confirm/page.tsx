@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
+import { getLineSession } from '@/lib/line-session'
+import { createBooking } from '@/app/actions/create-booking'
 import Link from 'next/link'
-import { LiffConfirm } from './LiffConfirm'
 
 type Props = {
   params: Promise<{ branchId: string; serviceId: string }>
@@ -11,6 +12,8 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   const { branchId, serviceId } = await params
   const { time, date } = await searchParams
   const supabase = await createClient()
+  const session = await getLineSession()
+
   const selectedDate = date ?? new Date().toISOString().split('T')[0]
 
   const { data: service } = await supabase
@@ -24,7 +27,9 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
         <div className="text-center">
           <p className="text-gray-500">ไม่พบเวลาที่เลือก</p>
           <Link href={`/branch/${branchId}/service/${serviceId}`}
-            className="mt-4 inline-block text-sm underline text-gray-900">กลับไปเลือกใหม่</Link>
+            className="mt-4 inline-block text-sm underline text-gray-900">
+            กลับไปเลือกใหม่
+          </Link>
         </div>
       </main>
     )
@@ -36,6 +41,7 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
 
   return (
     <main className="min-h-screen bg-gray-50">
+
       <div className="bg-white border-b sticky top-0 z-10">
         <div className="flex items-center gap-3 px-4 py-4">
           <Link href={`/branch/${branchId}/service/${serviceId}?date=${selectedDate}`}
@@ -63,21 +69,66 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
           </div>
         </div>
 
+        {/* LINE profile badge */}
+        {session && (
+          <div className="flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
+            {session.pictureUrl && (
+              <img src={session.pictureUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
+            )}
+            <div>
+              <div className="text-xs font-medium text-green-700">เชื่อมต่อ LINE แล้ว</div>
+              <div className="text-sm font-semibold text-green-900">{session.displayName}</div>
+            </div>
+          </div>
+        )}
+
         {/* Pending notice */}
         <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3.5 text-sm text-amber-800">
           <span className="text-lg leading-none">⏳</span>
           <span>ร้านจะยืนยันการจองให้ทราบทาง LINE ภายหลัง</span>
         </div>
 
-        {/* Form */}
+        {/* Form — server action, no LIFF */}
         <div className="bg-white rounded-2xl border border-gray-200 px-5 py-5">
           <h2 className="font-semibold text-gray-900 mb-4">ข้อมูลของคุณ</h2>
-          <LiffConfirm
-            branchId={branchId}
-            serviceId={serviceId}
-            time={time}
-            date={selectedDate}
-          />
+
+          <form action={createBooking} className="space-y-4">
+            <input type="hidden" name="branchId" value={branchId} />
+            <input type="hidden" name="serviceId" value={serviceId} />
+            <input type="hidden" name="time" value={time} />
+            <input type="hidden" name="date" value={selectedDate} />
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-900">ชื่อ-นามสกุล</label>
+              <input
+                type="text"
+                name="name"
+                required
+                defaultValue={session?.displayName ?? ''}
+                placeholder="กรอกชื่อของคุณ"
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-900">เบอร์โทรศัพท์</label>
+              <input
+                type="tel"
+                name="phone"
+                required
+                placeholder="0812345678"
+                inputMode="numeric"
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full rounded-2xl bg-black py-4 text-base font-bold text-white transition active:scale-[0.99]"
+            >
+              ส่งคำขอจอง
+            </button>
+          </form>
         </div>
 
       </div>

@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
+import { getLineSession } from '@/lib/line-session'
 import { redirect } from 'next/navigation'
 
 function addMinutes(time: string, minutes: number) {
@@ -8,19 +9,6 @@ function addMinutes(time: string, minutes: number) {
   const date = new Date()
   date.setHours(hours, mins + minutes, 0, 0)
   return date.toTimeString().slice(0, 5)
-}
-
-// ส่ง LINE notify แบบ fire-and-forget (ไม่ block การ redirect)
-async function sendLineNotify(type: string, data: object) {
-  try {
-    await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/line/notify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, data }),
-    })
-  } catch (err) {
-    console.error('LINE notify failed (non-critical):', err)
-  }
 }
 
 export async function createBooking(formData: FormData) {
@@ -32,7 +20,10 @@ export async function createBooking(formData: FormData) {
   const bookingDate = formData.get('date') as string
   const name        = formData.get('name') as string
   const phone       = formData.get('phone') as string
-  const lineUserId  = formData.get('lineUserId') as string | null  // จาก LIFF
+
+  // ✅ ดึง lineUserId จาก cookie ที่ /liff set ไว้
+  const session = await getLineSession()
+  const lineUserId = session?.lineUserId ?? null
 
   if (!branchId || !serviceId || !time || !bookingDate || !name) {
     redirect('/error?message=ข้อมูลไม่ครบถ้วน')
@@ -46,9 +37,11 @@ export async function createBooking(formData: FormData) {
     .from('branches').select('*').eq('id', branchId).single()
   if (!branch) redirect('/error?message=ไม่พบสาขา')
 
+  const { data: shop } = await supabase
+    .from('shops').select('id').eq('id', branch.shop_id).single()
+
   const endTime = addMinutes(time, service.duration_minutes)
 
-  // overlap check
   const { data: existingBookings, error: existingError } = await supabase
     .from('bookings')
     .select('start_time, end_time, status')
@@ -62,14 +55,12 @@ export async function createBooking(formData: FormData) {
     time < String(b.end_time).slice(0, 5) && endTime > String(b.start_time).slice(0, 5)
   ).length ?? 0
 
-  if (branch.booking_mode === 'single' && overlapping >= 1) {
+  if (branch.booking_mode === 'single' && overlapping >= 1)
     redirect('/error?message=เวลานี้ถูกจองแล้ว')
-  }
-  if (branch.booking_mode === 'capacity' && overlapping >= branch.max_parallel_bookings) {
+  if (branch.booking_mode === 'capacity' && overlapping >= branch.max_parallel_bookings)
     redirect('/error?message=เวลานี้เต็มแล้ว')
-  }
 
-  // upsert customer (ถ้ามีเบอร์นี้แล้วใช้ตัวเดิม)
+  // upsert customer
   let customer: any = null
   if (phone) {
     const { data: existing } = await supabase
@@ -77,7 +68,6 @@ export async function createBooking(formData: FormData) {
       .eq('shop_id', branch.shop_id).eq('phone', phone).maybeSingle()
     if (existing) {
       customer = existing
-      // อัพเดต line_user_id ถ้ายังไม่มี
       if (lineUserId && !existing.line_user_id) {
         await supabase.from('customers')
           .update({ line_user_id: lineUserId })
@@ -90,51 +80,61 @@ export async function createBooking(formData: FormData) {
   if (!customer) {
     const { data: newCustomer, error: customerError } = await supabase
       .from('customers')
-      .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId ?? null })
+      .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId })
       .select().single()
-    if (customerError || !newCustomer) redirect('/error?message=ไม่สามารถบันทึกข้อมูลลูกค้าได้')
+    if (customerError || !newCustomer)
+      redirect('/error?message=ไม่สามารถบันทึกข้อมูลลูกค้าได้')
     customer = newCustomer
   }
 
-  // create booking — status: pending รอร้านยืนยัน
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .insert({
-      branch_id: branchId,
-      customer_id: customer.id,
-      service_id: serviceId,
+      branch_id:    branchId,
+      customer_id:  customer.id,
+      service_id:   serviceId,
       booking_date: bookingDate,
-      start_time: time,
-      end_time: endTime,
-      status: 'pending',
-      total_price: service.price,
+      start_time:   time,
+      end_time:     endTime,
+      status:       'pending',
+      total_price:  service.price,
     })
     .select().single()
 
-  if (bookingError || !booking) {
+  if (bookingError || !booking)
     redirect(`/error?message=${encodeURIComponent(bookingError?.message ?? 'ไม่สามารถสร้าง booking ได้')}`)
-  }
 
-  // booking_services
   await supabase.from('booking_services').insert({
-    booking_id: booking.id,
-    service_id: serviceId,
+    booking_id:       booking.id,
+    service_id:       serviceId,
     duration_minutes: service.duration_minutes,
-    price: service.price,
+    price:            service.price,
   })
 
-  // ✅ ส่ง LINE แจ้งเตือน (ทั้งลูกค้าและ admin)
-  await sendLineNotify('booking_pending', {
-    bookingId: booking.id,
-    lineUserId: customer.line_user_id ?? null,
-    customerName: name,
-    phone: phone ?? '',
-    serviceName: service.name,
-    branchName: branch.name,
-    date: bookingDate,
-    time,
-    price: service.price,
-  })
+  // ส่ง LINE notify
+  try {
+    await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/line/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type:   'booking_pending',
+        shopId: shop?.id,
+        data: {
+          bookingId:    booking.id,
+          lineUserId:   customer.line_user_id ?? null,
+          customerName: name,
+          phone:        phone ?? '',
+          serviceName:  service.name,
+          branchName:   branch.name,
+          date:         bookingDate,
+          time,
+          price:        service.price,
+        },
+      }),
+    })
+  } catch (err) {
+    console.error('LINE notify failed (non-critical):', err)
+  }
 
   redirect('/success?pending=true')
 }
