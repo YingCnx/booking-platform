@@ -1,6 +1,9 @@
 import { createClient } from '@/utils/supabase/server'
 import Link from 'next/link'
 
+// ✅ Cache 60 วินาที — branches ไม่ค่อยเปลี่ยน
+export const revalidate = 60
+
 export default async function BranchListPage() {
   const supabase = await createClient()
   const { data: branches } = await supabase
@@ -20,6 +23,7 @@ export default async function BranchListPage() {
           <Link
             key={branch.id}
             href={`/branch/${branch.id}`}
+            prefetch={true}
             className="flex items-center justify-between bg-white rounded-2xl border border-gray-200 px-5 py-5 active:bg-gray-50 transition"
           >
             <div>
