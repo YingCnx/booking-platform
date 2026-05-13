@@ -18,16 +18,20 @@ export async function createBooking(formData: FormData) {
   const serviceId   = formData.get('serviceId') as string
   const time        = formData.get('time') as string
   const bookingDate = formData.get('date') as string
-  const name        = formData.get('name') as string
-  const phone       = formData.get('phone') as string
+  const name        = (formData.get('name') as string)?.trim()
+  const phone       = (formData.get('phone') as string)?.trim()
 
-  // ✅ ดึง lineUserId จาก cookie ที่ /liff set ไว้
-  const session = await getLineSession()
-  const lineUserId = session?.lineUserId ?? null
-
+  // ✅ validate
   if (!branchId || !serviceId || !time || !bookingDate || !name) {
     redirect('/error?message=ข้อมูลไม่ครบถ้วน')
   }
+  if (!/^\d{10}$/.test(phone)) {
+    redirect('/error?message=เบอร์โทรต้อง 10 หลัก')
+  }
+
+  // ✅ ดึง lineUserId จาก session
+  const session = await getLineSession()
+  const lineUserId = session?.lineUserId ?? null
 
   const { data: service } = await supabase
     .from('services').select('*').eq('id', serviceId).single()
@@ -42,6 +46,7 @@ export async function createBooking(formData: FormData) {
 
   const endTime = addMinutes(time, service.duration_minutes)
 
+  // overlap check
   const { data: existingBookings, error: existingError } = await supabase
     .from('bookings')
     .select('start_time, end_time, status')
@@ -60,33 +65,62 @@ export async function createBooking(formData: FormData) {
   if (branch.booking_mode === 'capacity' && overlapping >= branch.max_parallel_bookings)
     redirect('/error?message=เวลานี้เต็มแล้ว')
 
-  // upsert customer
+  // ===========================================
+  // ✅ Upsert customer — ยึด line_user_id เป็นหลัก
+  // ===========================================
   let customer: any = null
-  if (phone) {
-    const { data: existing } = await supabase
+
+  // 1. หา customer จาก line_user_id ก่อน (ถ้ามี session)
+  if (lineUserId) {
+    const { data: byLine } = await supabase
       .from('customers').select('*')
-      .eq('shop_id', branch.shop_id).eq('phone', phone).maybeSingle()
-    if (existing) {
-      customer = existing
-      if (lineUserId && !existing.line_user_id) {
-        await supabase.from('customers')
-          .update({ line_user_id: lineUserId })
-          .eq('id', existing.id)
-        customer.line_user_id = lineUserId
-      }
+      .eq('shop_id', branch.shop_id)
+      .eq('line_user_id', lineUserId)
+      .maybeSingle()
+    if (byLine) {
+      customer = byLine
+      // อัพเดต name + phone เสมอ (ใช้ค่าล่าสุดจากฟอร์ม)
+      await supabase.from('customers')
+        .update({ name, phone, updated_at: new Date().toISOString() })
+        .eq('id', byLine.id)
+      customer.name = name
+      customer.phone = phone
     }
   }
 
+  // 2. ถ้าไม่เจอจาก LINE — หาด้วยเบอร์ (เผื่อเคยจองก่อน LINE)
   if (!customer) {
-    const { data: newCustomer, error: customerError } = await supabase
+    const { data: byPhone } = await supabase
+      .from('customers').select('*')
+      .eq('shop_id', branch.shop_id)
+      .eq('phone', phone)
+      .maybeSingle()
+    if (byPhone) {
+      customer = byPhone
+      // ผูก lineUserId เข้ามา + อัพเดต name
+      const updates: any = { name, updated_at: new Date().toISOString() }
+      if (lineUserId && !byPhone.line_user_id) {
+        updates.line_user_id = lineUserId
+      }
+      await supabase.from('customers').update(updates).eq('id', byPhone.id)
+      customer.name = name
+      if (updates.line_user_id) customer.line_user_id = lineUserId
+    }
+  }
+
+  // 3. สร้างใหม่ถ้ายังไม่เจอ
+  if (!customer) {
+    const { data: newC, error: cErr } = await supabase
       .from('customers')
       .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId })
       .select().single()
-    if (customerError || !newCustomer)
-      redirect('/error?message=ไม่สามารถบันทึกข้อมูลลูกค้าได้')
-    customer = newCustomer
+    if (cErr || !newC) redirect('/error?message=บันทึกข้อมูลลูกค้าไม่สำเร็จ')
+    customer = newC
   }
 
+  // ===========================================
+  // สร้าง booking
+  // ===========================================
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .insert({
@@ -111,7 +145,7 @@ export async function createBooking(formData: FormData) {
     price:            service.price,
   })
 
-  // ส่ง LINE notify
+  // LINE notify
   try {
     await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/line/notify`, {
       method: 'POST',
@@ -133,7 +167,7 @@ export async function createBooking(formData: FormData) {
       }),
     })
   } catch (err) {
-    console.error('LINE notify failed (non-critical):', err)
+    console.error('LINE notify failed:', err)
   }
 
   redirect('/success?pending=true')

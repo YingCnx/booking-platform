@@ -1,7 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
 import { getLineSession } from '@/lib/line-session'
-import { createBooking } from '@/app/actions/create-booking'
 import Link from 'next/link'
+import { BookingForm } from './BookingForm'
 
 type Props = {
   params: Promise<{ branchId: string; serviceId: string }>
@@ -88,47 +88,16 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
           <span>ร้านจะยืนยันการจองให้ทราบทาง LINE ภายหลัง</span>
         </div>
 
-        {/* Form — server action, no LIFF */}
+        {/* Form */}
         <div className="bg-white rounded-2xl border border-gray-200 px-5 py-5">
           <h2 className="font-semibold text-gray-900 mb-4">ข้อมูลของคุณ</h2>
-
-          <form action={createBooking} className="space-y-4">
-            <input type="hidden" name="branchId" value={branchId} />
-            <input type="hidden" name="serviceId" value={serviceId} />
-            <input type="hidden" name="time" value={time} />
-            <input type="hidden" name="date" value={selectedDate} />
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-900">ชื่อ-นามสกุล</label>
-              <input
-                type="text"
-                name="name"
-                required
-                defaultValue={session?.displayName ?? ''}
-                placeholder="กรอกชื่อของคุณ"
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-gray-900">เบอร์โทรศัพท์</label>
-              <input
-                type="tel"
-                name="phone"
-                required
-                placeholder="0812345678"
-                inputMode="numeric"
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-4 text-base text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full rounded-2xl bg-black py-4 text-base font-bold text-white transition active:scale-[0.99]"
-            >
-              ส่งคำขอจอง
-            </button>
-          </form>
+          <BookingForm
+            branchId={branchId}
+            serviceId={serviceId}
+            time={time}
+            date={selectedDate}
+            defaultName={session?.displayName ?? ''}
+          />
         </div>
 
       </div>

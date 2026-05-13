@@ -1,26 +1,24 @@
 import { createClient } from '@/utils/supabase/server'
 import Link from 'next/link'
+import {
+  todayInBangkok,
+  currentMinutesInBangkok,
+  generateDates,
+} from '@/lib/timezone'
 
 type Props = {
   params: Promise<{ branchId: string; serviceId: string }>
   searchParams: Promise<{ date?: string }>
 }
 
-function generateDates() {
-  // ✅ ข้อ 4: แค่ 7 วัน (วันนี้ถึง +6 วัน)
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() + i)
-    return d.toISOString().split('T')[0]
-  })
-}
-
-function formatDateShort(dateStr: string) {
+function formatDateShort(dateStr: string, today: string) {
   const d = new Date(dateStr)
-  const isToday = dateStr === new Date().toISOString().split('T')[0]
-  if (isToday) return {
-    top: 'วันนี้',
-    bottom: d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }),
+  const isToday = dateStr === today
+  if (isToday) {
+    return {
+      top: 'วันนี้',
+      bottom: d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }),
+    }
   }
   return {
     top: d.toLocaleDateString('th-TH', { weekday: 'short' }),
@@ -32,14 +30,9 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   const { branchId, serviceId } = await params
   const { date } = await searchParams
 
-  const dates = generateDates()
-  const today = dates[0]
-
-  // ✅ ข้อ 4: ถ้าวันที่เลือกอยู่นอกช่วง 7 วัน ให้ใช้วันนี้แทน
-  const selectedDate = (date && dates.includes(date)) ? date : today
+  const today = todayInBangkok()
 
   const supabase = await createClient()
-
   const { data: service } = await supabase
     .from('services').select('*').eq('id', serviceId).single()
   const { data: branch } = await supabase
@@ -55,6 +48,32 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   const openTotal  = oH * 60 + oM
   const closeTotal = cH * 60 + cM
 
+  // ✅ ตรวจสอบเวลาปัจจุบันก่อนตัดสินใจว่าจะแสดงวันนี้ไหม
+  const currentMin = currentMinutesInBangkok()
+
+  // ถ้าเวลาปัจจุบันเลยเวลาทำการของวันนี้ไปแล้ว (ไม่มี slot เหลือพอ)
+  // → เริ่ม list วันที่จากพรุ่งนี้แทน
+  const isTodayPastBusiness = currentMin + duration > closeTotal
+  const allDates = generateDates(7)
+  const dates = isTodayPastBusiness
+    ? allDates.slice(1)   // ตัดวันนี้ออก
+    : allDates
+
+  // กรณีไม่มีวันให้เลือกเลย (ไม่น่าจะเกิด แต่กันไว้)
+  if (dates.length === 0) {
+    return (
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
+        <div className="text-center">
+          <p className="text-gray-500">ไม่มีวันที่จองได้</p>
+        </div>
+      </main>
+    )
+  }
+
+  const selectedDate =
+    date && dates.includes(date) ? date : dates[0]
+
+  // generate slots
   const allTimes: string[] = []
   for (let t = openTotal; t + duration <= closeTotal; t += slotInterval) {
     allTimes.push(
@@ -72,19 +91,16 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
     .eq('booking_date', selectedDate)
     .in('status', ['pending', 'confirmed'])
 
-  // ✅ ข้อ 4: คำนวณ current time สำหรับกัน past slots
   const isToday = selectedDate === today
-  const now = new Date()
-  const currentMinutes = now.getHours() * 60 + now.getMinutes()
 
   const slots = allTimes.map(time => {
     const [h, m] = time.split(':').map(Number)
-    const slotMinutes = h * 60 + m
-    const endMin  = slotMinutes + duration
+    const slotMin = h * 60 + m
+    const endMin  = slotMin + duration
     const endTime = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`
 
-    // ✅ กัน slot ที่ผ่านไปแล้ว (เฉพาะวันนี้)
-    const isPast = isToday && slotMinutes <= currentMinutes
+    // ✅ กัน slot ที่เวลาผ่านไปแล้ว (เฉพาะวันนี้ ใช้เวลาไทย)
+    const isPast = isToday && slotMin <= currentMin
 
     const overlap = bookings?.filter(b =>
       time < String(b.end_time).slice(0, 5) &&
@@ -120,7 +136,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">เลือกวัน</h2>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 snap-x">
             {dates.map(d => {
-              const { top, bottom } = formatDateShort(d)
+              const { top, bottom } = formatDateShort(d, today)
               const isSelected = selectedDate === d
               return (
                 <Link key={d}
@@ -165,10 +181,9 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
                   </Link>
                 ) : (
                   <div key={slot.time}
-                    className="bg-gray-100 border border-gray-100 rounded-2xl py-4 text-center text-sm font-medium text-gray-300"
+                    className="bg-gray-100 border border-gray-100 rounded-2xl py-4 text-center text-sm font-medium text-gray-300 opacity-60 pointer-events-none"
                   >
                     <div>{slot.time}</div>
-                    {/* ✅ แสดง "ผ่านแล้ว" แทน "เต็ม" สำหรับ past slots */}
                     <div className="text-xs mt-0.5">
                       {slot.isPast ? 'ผ่านแล้ว' : 'เต็ม'}
                     </div>
