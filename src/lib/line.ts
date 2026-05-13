@@ -67,10 +67,50 @@ export function buildAdminNotifyFlex(data: {
   time: string
   price: number
   bookingId: string
+  lineUserId?: string | null
 }) {
   const dateLabel = new Date(data.date).toLocaleDateString('th-TH', {
     weekday: 'short', day: 'numeric', month: 'short',
   })
+
+  // ✅ ปุ่ม footer — มีให้ทั้ง quick message + tel
+  const footerButtons: any[] = [
+    {
+      type: 'button',
+      style: 'primary',
+      color: '#18181b',
+      action: { type: 'uri', label: '✓ เปิด Dashboard ยืนยัน', uri: adminUrl() },
+    },
+  ]
+
+  // ปุ่มส่งข้อความหาลูกค้าทาง LINE (ใช้ Push Message API)
+  if (data.lineUserId) {
+    footerButtons.push({
+      type: 'button',
+      style: 'secondary',
+      action: {
+        type: 'uri',
+        label: '💬 ส่งข้อความหาลูกค้า',
+        uri: `${process.env.NEXT_PUBLIC_SITE_URL}/admin/contact?bookingId=${data.bookingId}&key=${process.env.ADMIN_SECRET_KEY ?? ''}`,
+      },
+      margin: 'sm',
+    })
+  }
+
+  // ปุ่มโทรหาลูกค้า
+  if (data.phone) {
+    footerButtons.push({
+      type: 'button',
+      style: 'secondary',
+      action: {
+        type: 'uri',
+        label: `📞 โทรหา ${data.phone}`,
+        uri: `tel:${data.phone}`,
+      },
+      margin: 'sm',
+    })
+  }
+
   return {
     type: 'flex',
     altText: `🔔 จองใหม่! ${data.customerName} — ${data.serviceName} ${data.time} น.`,
@@ -101,10 +141,7 @@ export function buildAdminNotifyFlex(data: {
       },
       footer: {
         type: 'box', layout: 'vertical', paddingAll: '12px',
-        contents: [{
-          type: 'button', style: 'primary', color: '#18181b',
-          action: { type: 'uri', label: '✓ เปิด Dashboard ยืนยัน', uri: adminUrl() },
-        }],
+        contents: footerButtons,
       },
     },
   }
