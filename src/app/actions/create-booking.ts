@@ -59,8 +59,14 @@ export async function createBooking(formData: FormData) {
   if (branch.booking_mode === 'capacity' && overlapping >= branch.max_parallel_bookings)
     redirect('/error?message=เวลานี้เต็มแล้ว')
 
-  // ✅ Optimize: หา existing customer ครั้งเดียว (LINE > phone)
+  // ✅ Customer upsert logic:
+  // 1) ถ้ามี lineUserId → หาจาก line_user_id ก่อน (ถ้าเจอ = ลูกค้าคนนี้แน่นอน)
+  //    → update ชื่อ+เบอร์เสมอ ไม่ insert ใหม่
+  // 2) ถ้าไม่มี lineUserId หรือหาไม่เจอ → หาจากเบอร์
+  //    → ถ้าเจอ update + ผูก line_user_id เข้าไป
+  // 3) ถ้ายังไม่เจอ → insert ใหม่
   let customer: any = null
+
   if (lineUserId) {
     const { data } = await supabase
       .from('customers').select('id, line_user_id')
@@ -69,27 +75,37 @@ export async function createBooking(formData: FormData) {
       .maybeSingle()
     customer = data
   }
-  if (!customer) {
-    const { data } = await supabase
+
+  if (customer) {
+    // มี line_user_id ในระบบแล้ว → update ชื่อ+เบอร์เสมอ
+    await supabase.from('customers').update({
+      name,
+      phone,
+      updated_at: new Date().toISOString(),
+    }).eq('id', customer.id)
+  } else {
+    // ไม่เจอจาก LINE → หาจากเบอร์
+    const { data: byPhone } = await supabase
       .from('customers').select('id, line_user_id')
       .eq('shop_id', branch.shop_id)
       .eq('phone', phone)
       .maybeSingle()
-    customer = data
-  }
 
-  // upsert
-  if (customer) {
-    const updates: any = { name, phone, updated_at: new Date().toISOString() }
-    if (lineUserId && !customer.line_user_id) updates.line_user_id = lineUserId
-    await supabase.from('customers').update(updates).eq('id', customer.id)
-  } else {
-    const { data: newC, error: cErr } = await supabase
-      .from('customers')
-      .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId })
-      .select('id').single()
-    if (cErr || !newC) redirect('/error?message=บันทึกข้อมูลลูกค้าไม่สำเร็จ')
-    customer = newC
+    if (byPhone) {
+      // เจอจากเบอร์ → update ชื่อ + ผูก line_user_id (ถ้ามี)
+      const updates: any = { name, updated_at: new Date().toISOString() }
+      if (lineUserId && !byPhone.line_user_id) updates.line_user_id = lineUserId
+      await supabase.from('customers').update(updates).eq('id', byPhone.id)
+      customer = byPhone
+    } else {
+      // ไม่เจอเลย → insert ใหม่
+      const { data: newC, error: cErr } = await supabase
+        .from('customers')
+        .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId })
+        .select('id').single()
+      if (cErr || !newC) redirect('/error?message=บันทึกข้อมูลลูกค้าไม่สำเร็จ')
+      customer = newC
+    }
   }
 
   // สร้าง booking

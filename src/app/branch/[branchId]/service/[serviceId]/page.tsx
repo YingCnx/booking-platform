@@ -12,6 +12,9 @@ type Props = {
   searchParams: Promise<{ date?: string }>
 }
 
+// ✅ จองล่วงหน้าอย่างน้อย 1 ชั่วโมง
+const MIN_ADVANCE_MINUTES = 60
+
 function formatDateShort(dateStr: string, today: string) {
   const d = new Date(dateStr)
   const isToday = dateStr === today
@@ -33,13 +36,12 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   const today = todayInBangkok()
   const supabase = await createClient()
 
-  // ✅ Parallel queries — service + branch พร้อมกัน
   const [
     { data: service },
     { data: branch },
   ] = await Promise.all([
     supabase.from('services')
-      .select('id, name, duration_minutes, price')
+      .select('id, name, duration_minutes')
       .eq('id', serviceId).single(),
     supabase.from('branches')
       .select('id, name, open_time, close_time, slot_interval_minutes, booking_mode, max_parallel_bookings, holiday_dates')
@@ -57,7 +59,12 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   const closeTotal = cH * 60 + cM
 
   const currentMin = currentMinutesInBangkok()
-  const isTodayPastBusiness = currentMin + duration > closeTotal
+
+  // ✅ เวลาขั้นต่ำที่จองได้วันนี้ (ปัจจุบัน + 1 ชม.)
+  const minBookableTime = currentMin + MIN_ADVANCE_MINUTES
+
+  // ✅ ถ้าเวลาขั้นต่ำเลยเวลาทำการแล้ว → ตัดวันนี้ออก
+  const isTodayPastBusiness = minBookableTime + duration > closeTotal
   const allDates = generateDates(7)
   const dates = isTodayPastBusiness ? allDates.slice(1) : allDates
 
@@ -71,7 +78,6 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
 
   const selectedDate = date && dates.includes(date) ? date : dates[0]
 
-  // ✅ Query bookings เฉพาะของ selectedDate
   const { data: bookings } = await supabase
     .from('bookings')
     .select('start_time, end_time')
@@ -93,16 +99,19 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
     const slotMin = h * 60 + m
     const endMin = slotMin + duration
     const endTime = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`
-    const isPast = isToday && slotMin <= currentMin
+
+    // ✅ ใช้ minBookableTime (ปัจจุบัน + 1 ชม.) แทนเวลาปัจจุบัน
+    const isTooSoon = isToday && slotMin < minBookableTime
+
     const overlap = bookings?.filter(b =>
       time < String(b.end_time).slice(0, 5) && endTime > String(b.start_time).slice(0, 5)
     ).length ?? 0
-    let available = !isPast
+    let available = !isTooSoon
     if (available) {
       if (branch?.booking_mode === 'single' && overlap >= 1) available = false
       if (branch?.booking_mode === 'capacity' && overlap >= (branch?.max_parallel_bookings ?? 1)) available = false
     }
-    return { time, available, isPast }
+    return { time, available }
   })
 
   return (
@@ -112,7 +121,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
           <Link href={`/branch/${branchId}`} className="text-gray-400 text-2xl leading-none">‹</Link>
           <div>
             <h1 className="font-bold text-gray-900 leading-tight">{service?.name}</h1>
-            <p className="text-xs text-gray-400 mt-0.5">{duration} นาที · ฿{service?.price}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{duration} นาที</p>
           </div>
         </div>
       </div>
@@ -168,8 +177,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
                   <div key={slot.time}
                     className="bg-gray-100 border border-gray-100 rounded-2xl py-4 text-center text-sm font-medium text-gray-300 opacity-60 pointer-events-none"
                   >
-                    <div>{slot.time}</div>
-                    <div className="text-xs mt-0.5">{slot.isPast ? 'ผ่านแล้ว' : 'เต็ม'}</div>
+                    {slot.time}
                   </div>
                 )
               )}

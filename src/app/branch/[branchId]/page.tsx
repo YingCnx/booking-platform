@@ -67,7 +67,6 @@ export default async function BranchPage({ params }: Props) {
                 <div className="text-xs text-gray-400 mt-1.5">⏱ {service.duration_minutes} นาที</div>
               </div>
               <div className="flex-shrink-0 text-right">
-                <div className="font-bold text-gray-900 text-lg">฿{service.price}</div>
                 <div className="text-xs text-gray-400 mt-0.5">จอง →</div>
               </div>
             </Link>

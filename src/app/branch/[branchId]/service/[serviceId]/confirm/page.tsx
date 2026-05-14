@@ -62,10 +62,6 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
             <Row label="สาขา" value={branch?.name} />
             <Row label="บริการ" value={service?.name} />
             <Row label="ระยะเวลา" value={`${service?.duration_minutes} นาที`} />
-            <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
-              <span className="font-semibold text-gray-700">ราคา</span>
-              <span className="text-2xl font-bold text-gray-900">฿{service?.price}</span>
-            </div>
           </div>
         </div>
 
