@@ -163,7 +163,7 @@ export function buildAdminNotifyFlex(data: {
         paddingAll: '10px',
         paddingBottom: '12px',
         contents: [
-          { type: 'text', text: 'นัดหมายใหม่ — รอยืนยัน', color: '#BFDBFE', size: 'xxs', weight: 'bold' },
+          { type: 'text', text: 'จองใหม่ — รอยืนยัน', color: '#FBBF24', size: 'xxs', weight: 'bold' },
           { type: 'text', text: data.customerName, color: '#FFFFFF', size: 'md', weight: 'bold', margin: 'xs' },
         ],
       },

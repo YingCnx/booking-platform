@@ -1,12 +1,19 @@
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { ShopManager } from './ShopManager'
 
 export default async function ShopsPage() {
+  const admin = await requireAdminSession()
   const supabase = await createClient()
+
+  // ✅ เห็นเฉพาะร้านของ admin
   const { data: shops } = await supabase
     .from('shops')
     .select('id, name, slug, phone, is_active, line_channel_id, line_admin_group_id, line_liff_id, branches(id, name)')
+    .eq('id', admin.shopId)
     .is('deleted_at', null)
     .order('created_at')
 

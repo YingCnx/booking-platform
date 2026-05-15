@@ -1,4 +1,8 @@
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { ServiceManager } from './ServiceManager'
 
@@ -8,10 +12,14 @@ type Props = {
 
 export default async function ServicesPage({ params }: Props) {
   const { branchId } = await params
+  const admin = await requireAdminSession()
   const supabase = await createClient()
 
   const { data: branch } = await supabase
-    .from('branches').select('id, name').eq('id', branchId).single()
+    .from('branches').select('id, name, shop_id').eq('id', branchId).single()
+
+  // ✅ กัน admin ของร้านอื่น
+  if (!branch || branch.shop_id !== admin.shopId) redirect('/admin')
 
   const { data: services } = await supabase
     .from('services')

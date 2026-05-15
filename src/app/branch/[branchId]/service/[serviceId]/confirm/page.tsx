@@ -1,4 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import { getLineSession } from '@/lib/line-session'
 import { normalizeFieldSchema } from '@/lib/field-schema'
 import Link from 'next/link'
@@ -14,6 +17,7 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   const { time, date } = await searchParams
   const supabase = await createClient()
   const session = await getLineSession()
+  if (!session?.shopId) redirect('/liff')
 
   const selectedDate = date ?? new Date().toISOString().split('T')[0]
 
@@ -25,6 +29,8 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
     supabase.from('services').select('id, name, duration_minutes').eq('id', serviceId).single(),
     supabase.from('branches').select('id, name, address, shop_id').eq('id', branchId).single(),
   ])
+
+  if (!branch || branch.shop_id !== session.shopId) redirect('/branch')
 
   // โหลด field schema ของ shop
   const { data: shop } = await supabase

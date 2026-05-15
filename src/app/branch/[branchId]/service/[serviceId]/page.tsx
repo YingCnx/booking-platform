@@ -1,4 +1,8 @@
 import { createClient } from '@/utils/supabase/server'
+import { getLineSession } from '@/lib/line-session'
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { SelectableLink } from '@/components/SelectableLink'
 import {
@@ -33,6 +37,10 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   const { branchId, serviceId } = await params
   const { date } = await searchParams
   const today = todayInBangkok()
+
+  const session = await getLineSession()
+  if (!session?.shopId) redirect('/liff')
+
   const supabase = await createClient()
 
   const [
@@ -43,9 +51,12 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
       .select('id, name, duration_minutes')
       .eq('id', serviceId).single(),
     supabase.from('branches')
-      .select('id, name, open_time, close_time, slot_interval_minutes, booking_mode, max_parallel_bookings, holiday_dates')
+      .select('id, name, shop_id, open_time, close_time, slot_interval_minutes, booking_mode, max_parallel_bookings, holiday_dates')
       .eq('id', branchId).single(),
   ])
+
+  // ✅ กัน cross-shop access
+  if (!branch || branch.shop_id !== session.shopId) redirect('/branch')
 
   const openTime    = String(branch?.open_time  ?? '09:00').slice(0, 5)
   const closeTime   = String(branch?.close_time ?? '18:00').slice(0, 5)

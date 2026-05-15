@@ -62,6 +62,11 @@ export async function createBooking(formData: FormData) {
   if (!branch) redirect('/error?message=ไม่พบสาขา')
   if (existingErr) redirect('/error?message=ไม่สามารถตรวจสอบคิวได้')
 
+  // ✅ กัน cross-shop — สาขาต้องเป็นของ shop ใน session
+  if (session?.shopId && branch.shop_id !== session.shopId) {
+    redirect('/error?message=ไม่อนุญาตให้จองข้ามร้าน')
+  }
+
   const endTime = addMinutes(time, service.duration_minutes)
 
   const overlapping = existingBookings?.filter((b: any) =>

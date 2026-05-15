@@ -1,43 +1,57 @@
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
 import Link from 'next/link'
 
+export const dynamic = 'force-dynamic'
+
 export default async function AdminPage() {
+  // ✅ บังคับ admin session + ได้ shopId
+  const admin = await requireAdminSession()
+
   const supabase = await createClient()
   const today = new Date().toISOString().split('T')[0]
 
+  // ✅ ดึงเฉพาะ branches ของ shop นี้
   const { data: branches, error: branchError } = await supabase
     .from('branches')
     .select('id, name, open_time, close_time, slot_interval_minutes, booking_mode')
+    .eq('shop_id', admin.shopId)
     .order('created_at')
 
-  // ✅ ดึง pending ทุกวัน (ไม่กรองวันที่)
-  const { data: allPending } = await supabase
-    .from('bookings')
-    .select(`
-      id, branch_id, booking_date, start_time, total_price,
-      customers ( name, phone ),
-      services ( name ),
-      branches ( id, name )
-    `)
-    .eq('status', 'pending')
-    .gte('booking_date', today)   // ตั้งแต่วันนี้เป็นต้นไป ไม่เอาอดีต
-    .order('booking_date')
-    .order('start_time')
+  const branchIds = (branches ?? []).map(b => b.id)
 
-  // ✅ ดึง confirmed วันนี้เท่านั้น
-  const { data: todayConfirmed } = await supabase
-    .from('bookings')
-    .select(`
-      id, branch_id, booking_date, start_time, end_time, total_price,
-      customers ( name, phone ),
-      services ( name ),
-      branches ( id, name )
-    `)
-    .eq('status', 'confirmed')
-    .eq('booking_date', today)
-    .order('start_time')
+  // ✅ pending ทุกวันของ branches ในร้าน
+  const { data: allPending } = branchIds.length
+    ? await supabase
+        .from('bookings')
+        .select(`
+          id, branch_id, booking_date, start_time, total_price,
+          customers ( name, phone ),
+          services ( name ),
+          branches ( id, name )
+        `)
+        .in('branch_id', branchIds)
+        .eq('status', 'pending')
+        .gte('booking_date', today)
+        .order('booking_date')
+        .order('start_time')
+    : { data: [] }
 
-  if (branchError) console.error('branches error:', branchError)
+  // ✅ confirmed วันนี้ของ branches ในร้าน
+  const { data: todayConfirmed } = branchIds.length
+    ? await supabase
+        .from('bookings')
+        .select(`
+          id, branch_id, booking_date, start_time, end_time, total_price,
+          customers ( name, phone ),
+          services ( name ),
+          branches ( id, name )
+        `)
+        .in('branch_id', branchIds)
+        .eq('status', 'confirmed')
+        .eq('booking_date', today)
+        .order('start_time')
+    : { data: [] }
 
   const pending   = (allPending   ?? []) as any[]
   const confirmed = (todayConfirmed ?? []) as any[]
@@ -55,12 +69,15 @@ export default async function AdminPage() {
   return (
     <div className="min-h-screen bg-black text-white">
       <header className="border-b border-gray-800 px-5 py-5 sticky top-0 z-10 bg-black">
-        <div className="text-xs text-gray-500 uppercase tracking-widest">Admin</div>
-        <div className="flex items-center justify-between mt-1">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <a href="/admin/shops" className="text-xs border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-            + จัดการร้าน
-          </a>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs text-gray-500 uppercase tracking-widest">{admin.shopName}</div>
+            <h1 className="text-2xl font-bold mt-1">Dashboard</h1>
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-gray-500">{admin.displayName}</div>
+            <div className="text-xs text-gray-600 mt-0.5">{admin.role}</div>
+          </div>
         </div>
       </header>
 
@@ -93,7 +110,7 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        {/* PENDING — ทุกวัน */}
+        {/* PENDING */}
         <section>
           <div className="flex items-center gap-2 mb-4">
             <h2 className="text-lg font-bold">⏳ รอยืนยัน</h2>
@@ -115,25 +132,16 @@ export default async function AdminPage() {
                   href={`/admin/branches/${b.branch_id}?date=${b.booking_date}`}
                   className="flex items-center gap-4 border border-amber-800/50 bg-amber-950/20 hover:bg-amber-950/40 rounded-xl px-4 py-4 transition active:scale-[0.99]"
                 >
-                  {/* วันที่ + เวลา */}
                   <div className="flex-shrink-0 text-center w-16">
-                    <div className="text-xs text-amber-400 font-medium">
-                      {formatDate(b.booking_date)}
-                    </div>
-                    <div className="text-lg font-bold tabular-nums mt-0.5">
-                      {String(b.start_time).slice(0, 5)}
-                    </div>
+                    <div className="text-xs text-amber-400 font-medium">{formatDate(b.booking_date)}</div>
+                    <div className="text-lg font-bold tabular-nums mt-0.5">{String(b.start_time).slice(0, 5)}</div>
                   </div>
-
-                  {/* ข้อมูล */}
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold truncate">{b.customers?.name}</div>
                     <div className="text-sm text-gray-400 mt-0.5 truncate">
                       {b.services?.name} · {b.branches?.name}
                     </div>
                   </div>
-
-                  {/* ราคา + arrow */}
                   <div className="flex-shrink-0 text-right">
                     <div className="text-sm font-bold text-amber-300">฿{b.total_price}</div>
                     <div className="text-xs text-amber-600 mt-0.5">ยืนยัน →</div>

@@ -1,4 +1,7 @@
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { ContactForm } from './ContactForm'
 
@@ -7,6 +10,7 @@ type Props = {
 }
 
 export default async function ContactPage({ searchParams }: Props) {
+  const admin = await requireAdminSession()
   const { bookingId } = await searchParams
 
   if (!bookingId) {
@@ -26,7 +30,7 @@ export default async function ContactPage({ searchParams }: Props) {
       id, booking_date, start_time, status,
       customers ( name, phone, line_user_id ),
       services ( name ),
-      branches ( name )
+      branches ( name, shop_id )
     `)
     .eq('id', bookingId)
     .single()
@@ -47,6 +51,17 @@ export default async function ContactPage({ searchParams }: Props) {
   const customer = booking.customers as any
   const service  = booking.services  as any
   const branch   = booking.branches  as any
+
+  // ✅ กัน admin ดู booking ของร้านอื่น
+  if (branch?.shop_id && branch.shop_id !== admin.shopId) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center px-6">
+        <div className="text-center">
+          <p className="text-zinc-500">ไม่อนุญาต</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-black text-white">

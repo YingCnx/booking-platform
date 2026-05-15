@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
+import { getAdminSession } from '@/lib/admin-session'
 
 export async function PATCH(req: Request) {
+  // ✅ ต้องเป็น admin
+  const admin = await getAdminSession()
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { bookingId, status } = await req.json()
 
   if (!bookingId || bookingId === 'undefined')
@@ -12,6 +17,18 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
 
   const supabase = await createClient()
+
+  // ✅ verify booking belongs to admin's shop
+  const { data: bookingCheck } = await supabase
+    .from('bookings')
+    .select('id, branches ( shop_id )')
+    .eq('id', bookingId)
+    .single()
+
+  const bookingShopId = (bookingCheck?.branches as any)?.shop_id
+  if (!bookingCheck || bookingShopId !== admin.shopId) {
+    return NextResponse.json({ error: 'ไม่อนุญาตให้แก้ไข booking ของร้านอื่น' }, { status: 403 })
+  }
 
   const { error: updateError } = await supabase
     .from('bookings')
@@ -36,7 +53,6 @@ export async function PATCH(req: Request) {
     const service  = booking.services  as any
     const branch   = booking.branches  as any
 
-    // ✅ ดึง booking_details
     const { data: details } = await supabase
       .from('booking_details')
       .select('field_label, value')

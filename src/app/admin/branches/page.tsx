@@ -1,6 +1,10 @@
 // app/admin/branches/[branchId]/page.tsx
 
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 
 type Props = {
@@ -11,6 +15,7 @@ type Props = {
 
 export default async function BranchDetailPage({ params }: Props) {
   const { branchId } = await params
+  const admin = await requireAdminSession()
 
   const supabase = await createClient()
 
@@ -19,6 +24,9 @@ export default async function BranchDetailPage({ params }: Props) {
     .select('*')
     .eq('id', branchId)
     .single()
+
+  // ✅ กัน admin ของร้านอื่น
+  if (!branch || branch.shop_id !== admin.shopId) redirect('/admin')
 
   const { data: bookings, error } = await supabase
     .from('bookings')

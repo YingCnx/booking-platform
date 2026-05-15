@@ -1,4 +1,8 @@
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { BookingTable } from './BookingTable'
 import { WorkingHoursForm } from './WorkingHoursForm'
@@ -9,6 +13,7 @@ type Props = {
 }
 
 export default async function BranchAdminPage({ params, searchParams }: Props) {
+  const admin = await requireAdminSession()
   const supabase = await createClient()
   const { branchId } = await params
   const { tab = 'bookings' } = await searchParams
@@ -17,6 +22,11 @@ export default async function BranchAdminPage({ params, searchParams }: Props) {
 
   const { data: branch } = await supabase
     .from('branches').select('*').eq('id', branchId).single()
+
+  // ✅ กัน admin ของร้านอื่นเข้ามาดู
+  if (!branch || branch.shop_id !== admin.shopId) {
+    redirect('/admin')
+  }
 
   // ✅ ดึงทุก booking ตั้งแต่วันนี้เป็นต้นไป ไม่กรองวันที่
   const { data: rawBookings, error } = await supabase

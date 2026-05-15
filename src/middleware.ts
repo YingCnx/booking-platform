@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import crypto from 'crypto'
 
-// ✅ verify token แบบเดียวกับใน lib/line.ts
 function verifyAdminToken(token: string): { exp: number } | null {
   try {
     const [data, sig] = token.split('.')
@@ -21,39 +20,31 @@ export function middleware(req: NextRequest) {
 
   // ===== ADMIN PATHS =====
   if (pathname.startsWith('/admin')) {
-    const secret = process.env.ADMIN_SECRET_KEY
-    if (!secret) return NextResponse.next()
+    // ✅ ต้องมี line_session เสมอ (ระบบจะเช็ค admin_users ใน server component)
+    const hasLineSession = req.cookies.get('line_session')?.value
 
-    // ✅ ใหม่: token-based access (จาก Flex Message link)
-    const tokenFromQuery = searchParams.get('token')
-    if (tokenFromQuery) {
-      const payload = verifyAdminToken(tokenFromQuery)
-      if (payload) {
-        // token valid → set short-lived cookie (4 ชม.)
+    if (hasLineSession) {
+      // ✅ ถ้ามี token จาก Flex link → set admin_session cookie ด้วย
+      //    (เพื่อให้ link จาก group เปิดได้โดยไม่ต้อง re-auth)
+      const tokenFromQuery = searchParams.get('token')
+      if (tokenFromQuery && verifyAdminToken(tokenFromQuery)) {
         const res = NextResponse.next()
-        res.cookies.set('admin_session', tokenFromQuery, {
-          httpOnly: true,
-          secure: true,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 4,
-          path: '/',
+        res.cookies.set('admin_token', tokenFromQuery, {
+          httpOnly: true, secure: true, sameSite: 'lax',
+          maxAge: 60 * 60 * 4, path: '/',
         })
         return res
       }
+      return NextResponse.next()
     }
 
-    // ✅ มี cookie session อยู่แล้ว → check expiry
-    const sessionCookie = req.cookies.get('admin_session')?.value
-    if (sessionCookie) {
-      const payload = verifyAdminToken(sessionCookie)
-      if (payload) return NextResponse.next()
-    }
-
-    // ❌ ไม่มี token / token หมดอายุ
-    return NextResponse.redirect(new URL('/admin-login', req.url))
+    // ❌ ไม่มี line_session → ต้อง login ก่อน
+    const liffUrl = new URL('/liff', req.url)
+    liffUrl.searchParams.set('next', pathname + req.nextUrl.search)
+    return NextResponse.redirect(liffUrl)
   }
 
-  // ===== CUSTOMER PATHS — บังคับ LINE login =====
+  // ===== CUSTOMER PATHS =====
   const hasSession = req.cookies.get('line_session')?.value
   if (!hasSession) {
     const liffUrl = new URL('/liff', req.url)
@@ -66,6 +57,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!liff|api|admin|admin-login|_next/static|_next/image|favicon.ico|error|success).*)',
+    '/((?!liff|api|admin-login|_next/static|_next/image|favicon.ico|error|success).*)',
   ],
 }

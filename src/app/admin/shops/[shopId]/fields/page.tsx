@@ -1,4 +1,8 @@
 import { createClient } from '@/utils/supabase/server'
+import { requireAdminSession } from '@/lib/admin-session'
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { FieldManager } from './FieldManager'
 import { normalizeFieldSchema } from '@/lib/field-schema'
@@ -9,6 +13,8 @@ type Props = {
 
 export default async function FieldsPage({ params }: Props) {
   const { shopId } = await params
+  const admin = await requireAdminSession()
+  if (shopId !== admin.shopId) redirect('/admin')
   const supabase = await createClient()
   const { data: shop } = await supabase
     .from('shops')

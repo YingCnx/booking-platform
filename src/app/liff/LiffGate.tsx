@@ -64,6 +64,7 @@ export function LiffGate({ liffId, redirectTo }: Props) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             idToken,
+            liffId,
             displayName: profile.displayName,
             pictureUrl:  profile.pictureUrl ?? null,
           }),
