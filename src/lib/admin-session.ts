@@ -1,89 +1,134 @@
 import { cookies } from 'next/headers'
 import { createClient } from '@/utils/supabase/server'
-import crypto from 'crypto'
-
-// ==============================================
-// Admin session — ผูก line_user_id + shop_id
-// ==============================================
 
 export type AdminSession = {
-  lineUserId: string
-  shopId: string
-  shopSlug: string
-  shopName: string
-  displayName: string
-  role: string
+  adminUserId:    string
+  lineUserId:     string
+  displayName:    string
+  pictureUrl:     string
+  role:           'super' | 'shop_admin'
+  // shops ที่ admin คนนี้เป็น admin
+  shops:          Array<{ id: string; name: string; role: 'owner' | 'staff' }>
+  // shop ที่กำลังเลือกใช้งานอยู่
+  selectedShopId: string | null
 }
 
-// verify token (ใช้ในกรณีเปิดผ่าน Flex link)
-function verifyToken(token: string): { exp: number; bookingId?: string } | null {
-  try {
-    const [data, sig] = token.split('.')
-    if (!data || !sig) return null
-    const secret = process.env.ADMIN_SECRET_KEY ?? ''
-    const expected = crypto.createHmac('sha256', secret).update(data).digest('base64url')
-    if (sig !== expected) return null
-    const payload = JSON.parse(Buffer.from(data, 'base64url').toString())
-    if (payload.exp < Date.now()) return null
-    return payload
-  } catch { return null }
-}
+// ===== Cookie helpers =====
+const COOKIE_NAME = 'admin_session_v2'
 
-// ✅ ดึง admin session จาก cookies
-//   priority: line_session (LINE login + admin_users lookup) > token-only (เปิดจาก flex link)
 export async function getAdminSession(): Promise<AdminSession | null> {
   const cookieStore = await cookies()
-  const supabase = await createClient()
+  const raw = cookieStore.get(COOKIE_NAME)?.value
+  if (!raw) return null
 
-  // 1. ถ้ามี line_session — ใช้เป็นตัวหลัก
-  const lineRaw = cookieStore.get('line_session')?.value
-  if (lineRaw) {
-    try {
-      const line = JSON.parse(lineRaw)
-      // หา admin_users ที่ผูกกับ line_user_id นี้
-      const { data: admin } = await supabase
-        .from('admin_users')
-        .select(`
-          shop_id, role, display_name, is_active,
-          shops ( id, slug, name )
-        `)
-        .eq('line_user_id', line.lineUserId)
-        .eq('is_active', true)
-        .maybeSingle()
+  try {
+    const stored = JSON.parse(raw) as {
+      adminUserId: string
+      selectedShopId: string | null
+    }
+    if (!stored.adminUserId) return null
 
-      if (admin && admin.is_active) {
-        const shop = admin.shops as any
-        return {
-          lineUserId:  line.lineUserId,
-          shopId:      shop?.id ?? admin.shop_id,
-          shopSlug:    shop?.slug ?? '',
-          shopName:    shop?.name ?? '',
-          displayName: admin.display_name ?? line.displayName ?? '',
-          role:        admin.role,
-        }
-      }
-    } catch {}
-  }
+    // refresh ข้อมูล admin + shops จาก DB ทุกครั้ง (กรณีถูกถอนสิทธิ์)
+    const supabase = await createClient()
+    const { data: admin } = await supabase
+      .from('admin_users')
+      .select(`
+        id, line_user_id, display_name, role, is_active,
+        shop_admins (
+          shop_id, role,
+          shops ( id, name, is_active )
+        )
+      `)
+      .eq('id', stored.adminUserId)
+      .single()
 
-  // 2. fallback — admin_session cookie (token-based จาก flex link)
-  //    เปิด admin จาก Flex แต่ไม่มี line login → ให้สิทธิ์ตามจริงไม่ได้
-  //    ต้องเช็คว่า token ยัง valid
-  const tok = cookieStore.get('admin_session')?.value
-  if (tok && verifyToken(tok)) {
-    // ⚠️ token-only session — ไม่รู้ว่าเป็น admin ของร้านไหน
-    // → return null เพื่อบังคับให้ login ผ่าน LINE
+    if (!admin || !admin.is_active) return null
+
+    const shops = (admin.shop_admins ?? [])
+      .filter((sa: any) => sa.shops?.is_active)
+      .map((sa: any) => ({
+        id:   sa.shops.id,
+        name: sa.shops.name,
+        role: sa.role,
+      }))
+
+    // ถ้าไม่ได้เป็น admin ของร้านไหนเลย (และไม่ใช่ super) → ไม่ให้เข้า
+    if (shops.length === 0 && admin.role !== 'super') return null
+
+    // ถ้า selectedShopId ไม่อยู่ใน list → เลือกร้านแรก (หรือ null สำหรับ super)
+    let selectedShopId = stored.selectedShopId
+    if (selectedShopId && !shops.some(s => s.id === selectedShopId)) {
+      selectedShopId = shops[0]?.id ?? null
+    }
+    if (!selectedShopId && shops.length > 0) {
+      selectedShopId = shops[0].id
+    }
+
+    return {
+      adminUserId: admin.id,
+      lineUserId:  admin.line_user_id,
+      displayName: admin.display_name ?? '',
+      pictureUrl:  '',
+      role:        admin.role as 'super' | 'shop_admin',
+      shops,
+      selectedShopId,
+    }
+  } catch {
     return null
   }
-
-  return null
 }
 
-// helper สำหรับใช้ใน server component / api route
-export async function requireAdminSession(): Promise<AdminSession> {
+export async function setAdminSession(adminUserId: string, selectedShopId: string | null) {
+  const cookieStore = await cookies()
+  cookieStore.set(COOKIE_NAME, JSON.stringify({ adminUserId, selectedShopId }), {
+    httpOnly: true,
+    secure:   true,
+    sameSite: 'lax',
+    maxAge:   60 * 60 * 24 * 7,  // 7 days
+    path:     '/',
+  })
+}
+
+export async function clearAdminSession() {
+  const cookieStore = await cookies()
+  cookieStore.delete(COOKIE_NAME)
+}
+
+// ===== Helper: บังคับมี session + selected shop =====
+import { redirect } from 'next/navigation'
+
+export type RequiredAdminContext = {
+  adminUserId:    string
+  lineUserId:     string
+  displayName:    string
+  role:           'super' | 'shop_admin'
+  shops:          Array<{ id: string; name: string; role: 'owner' | 'staff' }>
+  shopId:         string   // selected
+  shopName:       string
+}
+
+export async function requireAdminSession(): Promise<RequiredAdminContext> {
   const session = await getAdminSession()
-  if (!session) {
-    const { redirect } = await import('next/navigation')
+  if (!session) redirect('/admin-login')
+
+  if (!session.selectedShopId) {
+    // super admin ที่ยังไม่ได้เลือก shop → ไปหน้าเลือก
+    if (session.role === 'super') {
+      redirect('/admin/select-shop')
+    }
     redirect('/admin-login')
   }
-  return session!
+
+  const selectedShop = session.shops.find(s => s.id === session.selectedShopId)
+  if (!selectedShop) redirect('/admin-login')
+
+  return {
+    adminUserId: session.adminUserId,
+    lineUserId:  session.lineUserId,
+    displayName: session.displayName,
+    role:        session.role,
+    shops:       session.shops,
+    shopId:      session.selectedShopId,
+    shopName:    selectedShop.name,
+  }
 }

@@ -1,18 +1,16 @@
 import { createClient } from '@/utils/supabase/server'
 import { requireAdminSession } from '@/lib/admin-session'
+import { AdminHeader } from './_components/AdminHeader'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminPage() {
-  // ✅ บังคับ admin session + ได้ shopId
   const admin = await requireAdminSession()
-
   const supabase = await createClient()
   const today = new Date().toISOString().split('T')[0]
 
-  // ✅ ดึงเฉพาะ branches ของ shop นี้
-  const { data: branches, error: branchError } = await supabase
+  const { data: branches } = await supabase
     .from('branches')
     .select('id, name, open_time, close_time, slot_interval_minutes, booking_mode')
     .eq('shop_id', admin.shopId)
@@ -20,7 +18,6 @@ export default async function AdminPage() {
 
   const branchIds = (branches ?? []).map(b => b.id)
 
-  // ✅ pending ทุกวันของ branches ในร้าน
   const { data: allPending } = branchIds.length
     ? await supabase
         .from('bookings')
@@ -37,7 +34,6 @@ export default async function AdminPage() {
         .order('start_time')
     : { data: [] }
 
-  // ✅ confirmed วันนี้ของ branches ในร้าน
   const { data: todayConfirmed } = branchIds.length
     ? await supabase
         .from('bookings')
@@ -68,41 +64,26 @@ export default async function AdminPage() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <header className="border-b border-gray-800 px-5 py-5 sticky top-0 z-10 bg-black">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-widest">{admin.shopName}</div>
-            <h1 className="text-2xl font-bold mt-1">Dashboard</h1>
-          </div>
-          <div className="text-right">
-            <div className="text-xs text-gray-500">{admin.displayName}</div>
-            <div className="text-xs text-gray-600 mt-0.5">{admin.role}</div>
-          </div>
-        </div>
-      </header>
+      <AdminHeader
+        displayName={admin.displayName}
+        role={admin.role}
+        shops={admin.shops}
+        currentShopId={admin.shopId}
+        currentShopName={admin.shopName}
+      />
 
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-8">
 
-        {branchError && (
-          <div className="border border-red-800 bg-red-950/30 rounded-xl p-4 text-sm text-red-400">
-            {branchError.message}
-          </div>
-        )}
-
-        {/* STATS */}
         <div className="grid grid-cols-3 gap-3">
           <div className={`rounded-xl p-4 border ${pending.length > 0 ? 'border-amber-700 bg-amber-950/30' : 'border-gray-800 bg-gray-900'}`}>
             <div className={`text-3xl font-bold tabular-nums ${pending.length > 0 ? 'text-amber-300' : 'text-white'}`}>
               {pending.length}
             </div>
             <div className="text-xs text-gray-500 mt-1.5 uppercase tracking-wider">รอยืนยัน</div>
-            {pending.length > 0 && (
-              <div className="mt-1.5 text-xs text-amber-500 animate-pulse">● ต้องดำเนินการ</div>
-            )}
           </div>
           <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
             <div className="text-3xl font-bold tabular-nums text-emerald-400">{confirmed.length}</div>
-            <div className="text-xs text-gray-500 mt-1.5 uppercase tracking-wider">ยืนยันวันนี้</div>
+            <div className="text-xs text-gray-500 mt-1.5 uppercase tracking-wider">วันนี้</div>
           </div>
           <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
             <div className="text-3xl font-bold tabular-nums">{branches?.length ?? 0}</div>
@@ -110,7 +91,6 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        {/* PENDING */}
         <section>
           <div className="flex items-center gap-2 mb-4">
             <h2 className="text-lg font-bold">⏳ รอยืนยัน</h2>
@@ -130,7 +110,7 @@ export default async function AdminPage() {
               {pending.map((b) => (
                 <Link key={b.id}
                   href={`/admin/branches/${b.branch_id}?date=${b.booking_date}`}
-                  className="flex items-center gap-4 border border-amber-800/50 bg-amber-950/20 hover:bg-amber-950/40 rounded-xl px-4 py-4 transition active:scale-[0.99]"
+                  className="flex items-center gap-4 border border-amber-800/50 bg-amber-950/20 hover:bg-amber-950/40 rounded-xl px-4 py-4 transition"
                 >
                   <div className="flex-shrink-0 text-center w-16">
                     <div className="text-xs text-amber-400 font-medium">{formatDate(b.booking_date)}</div>
@@ -152,10 +132,8 @@ export default async function AdminPage() {
           )}
         </section>
 
-        {/* TODAY CONFIRMED */}
         <section>
           <h2 className="text-lg font-bold mb-4">✅ คิววันนี้</h2>
-
           {!confirmed.length ? (
             <div className="border border-gray-800 bg-gray-900 rounded-xl px-5 py-8 text-center text-gray-600 text-sm">
               ยังไม่มีคิวที่ยืนยันวันนี้
@@ -175,16 +153,12 @@ export default async function AdminPage() {
                     <div className="text-xs text-gray-500 truncate">{b.services?.name} · {b.branches?.name}</div>
                   </div>
                   <span className="text-sm font-bold text-gray-400 flex-shrink-0">฿{b.total_price}</span>
-                  <span className="text-xs px-2.5 py-1 rounded-full border bg-emerald-950 text-emerald-400 border-emerald-800 flex-shrink-0">
-                    ยืนยัน
-                  </span>
                 </Link>
               ))}
             </div>
           )}
         </section>
 
-        {/* BRANCHES */}
         <section>
           <h2 className="text-lg font-bold mb-4">สาขา</h2>
           <div className="space-y-2">

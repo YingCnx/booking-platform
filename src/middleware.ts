@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// ✅ Web Crypto API — รองรับ Edge Runtime
+// ===== Web Crypto API token verify (สำหรับ token จาก Flex Message) =====
 async function verifyAdminToken(token: string): Promise<{ exp: number } | null> {
   try {
     const [data, sig] = token.split('.')
@@ -10,23 +10,17 @@ async function verifyAdminToken(token: string): Promise<{ exp: number } | null> 
     const secret = process.env.ADMIN_SECRET_KEY ?? ''
     const encoder = new TextEncoder()
     const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
+      'raw', encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
     )
     const sigBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(data))
     const expected = base64UrlEncode(new Uint8Array(sigBuffer))
-
     if (sig !== expected) return null
 
     const payload = JSON.parse(atob(data.replace(/-/g, '+').replace(/_/g, '/')))
     if (payload.exp < Date.now()) return null
     return payload
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {
@@ -40,34 +34,34 @@ export async function middleware(req: NextRequest) {
 
   // ===== ADMIN PATHS =====
   if (pathname.startsWith('/admin')) {
-    const secret = process.env.ADMIN_SECRET_KEY
-    if (!secret) return NextResponse.next()
 
-    // ✅ token-based access (จาก Flex Message link)
+    // ✅ Method 1: LINE Login session (admin_session_v2) — Phase 2
+    const hasLineSession = req.cookies.get('admin_session_v2')?.value
+    if (hasLineSession) {
+      return NextResponse.next()
+    }
+
+    // ✅ Method 2: token จาก Flex Message link (30 นาที)
     const tokenFromQuery = searchParams.get('token')
     if (tokenFromQuery) {
       const payload = await verifyAdminToken(tokenFromQuery)
       if (payload) {
         const res = NextResponse.next()
-        res.cookies.set('admin_session', tokenFromQuery, {
-          httpOnly: true,
-          secure: true,
-          sameSite: 'lax',
-          maxAge: 60 * 60 * 4,
-          path: '/',
+        res.cookies.set('admin_token', tokenFromQuery, {
+          httpOnly: true, secure: true, sameSite: 'lax',
+          maxAge: 60 * 60 * 4, path: '/',
         })
         return res
       }
     }
 
-    // ✅ มี cookie session อยู่แล้ว → check expiry
-    const sessionCookie = req.cookies.get('admin_session')?.value
-    if (sessionCookie) {
-      const payload = await verifyAdminToken(sessionCookie)
+    const tokenCookie = req.cookies.get('admin_token')?.value
+    if (tokenCookie) {
+      const payload = await verifyAdminToken(tokenCookie)
       if (payload) return NextResponse.next()
     }
 
-    // ❌ ไม่มี token / token หมดอายุ
+    // ❌ ไม่มี session → redirect ไป login
     return NextResponse.redirect(new URL('/admin-login', req.url))
   }
 
@@ -84,6 +78,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!liff|api|admin|admin-login|_next/static|_next/image|favicon.ico|error|success).*)',
+    '/((?!liff|api|admin-login|_next/static|_next/image|favicon.ico|error|success).*)',
   ],
 }
