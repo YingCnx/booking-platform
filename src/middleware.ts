@@ -1,50 +1,77 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import crypto from 'crypto'
 
-function verifyAdminToken(token: string): { exp: number } | null {
+// ✅ Web Crypto API — รองรับ Edge Runtime
+async function verifyAdminToken(token: string): Promise<{ exp: number } | null> {
   try {
     const [data, sig] = token.split('.')
     if (!data || !sig) return null
+
     const secret = process.env.ADMIN_SECRET_KEY ?? ''
-    const expected = crypto.createHmac('sha256', secret).update(data).digest('base64url')
+    const encoder = new TextEncoder()
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    )
+    const sigBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(data))
+    const expected = base64UrlEncode(new Uint8Array(sigBuffer))
+
     if (sig !== expected) return null
-    const payload = JSON.parse(Buffer.from(data, 'base64url').toString())
+
+    const payload = JSON.parse(atob(data.replace(/-/g, '+').replace(/_/g, '/')))
     if (payload.exp < Date.now()) return null
     return payload
-  } catch { return null }
+  } catch {
+    return null
+  }
 }
 
-export function middleware(req: NextRequest) {
+function base64UrlEncode(bytes: Uint8Array): string {
+  let str = ''
+  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i])
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
+export async function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl
 
   // ===== ADMIN PATHS =====
   if (pathname.startsWith('/admin')) {
-    // ✅ ต้องมี line_session เสมอ (ระบบจะเช็ค admin_users ใน server component)
-    const hasLineSession = req.cookies.get('line_session')?.value
+    const secret = process.env.ADMIN_SECRET_KEY
+    if (!secret) return NextResponse.next()
 
-    if (hasLineSession) {
-      // ✅ ถ้ามี token จาก Flex link → set admin_session cookie ด้วย
-      //    (เพื่อให้ link จาก group เปิดได้โดยไม่ต้อง re-auth)
-      const tokenFromQuery = searchParams.get('token')
-      if (tokenFromQuery && verifyAdminToken(tokenFromQuery)) {
+    // ✅ token-based access (จาก Flex Message link)
+    const tokenFromQuery = searchParams.get('token')
+    if (tokenFromQuery) {
+      const payload = await verifyAdminToken(tokenFromQuery)
+      if (payload) {
         const res = NextResponse.next()
-        res.cookies.set('admin_token', tokenFromQuery, {
-          httpOnly: true, secure: true, sameSite: 'lax',
-          maxAge: 60 * 60 * 4, path: '/',
+        res.cookies.set('admin_session', tokenFromQuery, {
+          httpOnly: true,
+          secure: true,
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 4,
+          path: '/',
         })
         return res
       }
-      return NextResponse.next()
     }
 
-    // ❌ ไม่มี line_session → ต้อง login ก่อน
-    const liffUrl = new URL('/liff', req.url)
-    liffUrl.searchParams.set('next', pathname + req.nextUrl.search)
-    return NextResponse.redirect(liffUrl)
+    // ✅ มี cookie session อยู่แล้ว → check expiry
+    const sessionCookie = req.cookies.get('admin_session')?.value
+    if (sessionCookie) {
+      const payload = await verifyAdminToken(sessionCookie)
+      if (payload) return NextResponse.next()
+    }
+
+    // ❌ ไม่มี token / token หมดอายุ
+    return NextResponse.redirect(new URL('/admin-login', req.url))
   }
 
-  // ===== CUSTOMER PATHS =====
+  // ===== CUSTOMER PATHS — บังคับ LINE login =====
   const hasSession = req.cookies.get('line_session')?.value
   if (!hasSession) {
     const liffUrl = new URL('/liff', req.url)
@@ -57,6 +84,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!liff|api|admin-login|_next/static|_next/image|favicon.ico|error|success).*)',
+    '/((?!liff|api|admin|admin-login|_next/static|_next/image|favicon.ico|error|success).*)',
   ],
 }
