@@ -50,6 +50,8 @@ export async function POST(req: Request) {
 
   // ✅ verify idToken ด้วย channel_id ของร้านนั้น
   const channelId = shop.line_channel_id ?? process.env.LINE_LOGIN_CHANNEL_ID
+  console.log(channelId)
+  
   if (!channelId) {
     return NextResponse.json({ message: 'ร้านยังไม่ได้ตั้งค่า channel_id' }, { status: 500 })
   }
