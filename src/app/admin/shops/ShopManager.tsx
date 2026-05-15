@@ -123,24 +123,7 @@ export function ShopManager({ initialShops }: { initialShops: Shop[] }) {
         </div>
       ))}
 
-      {adding ? (
-        <div className="border border-gray-700 bg-gray-900 rounded-xl p-5 space-y-4">
-          <div className="text-sm font-semibold text-gray-300">เพิ่มร้านใหม่</div>
-          <ShopForm form={form} set={set} />
-          <div className="flex gap-2">
-            <button onClick={saveNew} disabled={loading === 'add'}
-              className="flex-1 py-2.5 bg-white text-black text-sm font-semibold rounded-xl disabled:opacity-50">
-              {loading === 'add' ? 'กำลังบันทึก...' : 'เพิ่มร้าน'}
-            </button>
-            <button onClick={cancel} className="px-5 py-2.5 border border-gray-700 text-gray-400 text-sm rounded-xl">ยกเลิก</button>
-          </div>
-        </div>
-      ) : (
-        <button onClick={() => { setAdding(true); setEditing(null); setForm(emptyForm); setError('') }}
-          className="w-full py-3 border border-dashed border-gray-700 text-gray-500 text-sm rounded-xl hover:border-gray-500 hover:text-gray-300 transition">
-          + เพิ่มร้านใหม่
-        </button>
-      )}
+
     </div>
   )
 }

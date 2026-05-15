@@ -126,7 +126,7 @@ export function buildAdminNotifyFlex(data: {
       style: 'primary',
       color: '#1C1C1E',
       height: 'sm',
-      action: { type: 'uri', label: 'ยืนยันคิว', uri: adminUrl(data.bookingId) },
+      action: { type: 'uri', label: 'Dashboard', uri: adminUrl(data.bookingId) },
     },
   ]
 
@@ -159,11 +159,11 @@ export function buildAdminNotifyFlex(data: {
       size: 'kilo',
       header: {
         type: 'box', layout: 'vertical',
-        backgroundColor: '#1E40AF',
+        backgroundColor: '#18181B',
         paddingAll: '10px',
         paddingBottom: '12px',
         contents: [
-          { type: 'text', text: 'จองใหม่ — รอยืนยัน', color: '#BFDBFE', size: 'xxs', weight: 'bold' },
+          { type: 'text', text: 'คำขอใหม่ — รอยืนยัน', color: '#BFDBFE', size: 'xxs', weight: 'bold' },
           { type: 'text', text: data.customerName, color: '#FFFFFF', size: 'md', weight: 'bold', margin: 'xs' },
         ],
       },
