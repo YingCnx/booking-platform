@@ -12,7 +12,6 @@ type Props = {
   searchParams: Promise<{ date?: string }>
 }
 
-// ✅ จองล่วงหน้าอย่างน้อย 1 ชั่วโมง
 const MIN_ADVANCE_MINUTES = 60
 
 function formatDateShort(dateStr: string, today: string) {
@@ -59,11 +58,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   const closeTotal = cH * 60 + cM
 
   const currentMin = currentMinutesInBangkok()
-
-  // ✅ เวลาขั้นต่ำที่จองได้วันนี้ (ปัจจุบัน + 1 ชม.)
   const minBookableTime = currentMin + MIN_ADVANCE_MINUTES
-
-  // ✅ ถ้าเวลาขั้นต่ำเลยเวลาทำการแล้ว → ตัดวันนี้ออก
   const isTodayPastBusiness = minBookableTime + duration > closeTotal
   const allDates = generateDates(7)
   const dates = isTodayPastBusiness ? allDates.slice(1) : allDates
@@ -71,7 +66,10 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   if (dates.length === 0) {
     return (
       <main className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
-        <div className="text-center"><p className="text-gray-500">ไม่มีวันที่จองได้</p></div>
+        <div className="text-center">
+          <div className="text-5xl mb-3">📅</div>
+          <p className="text-gray-500 text-sm">ไม่มีวันที่จองได้</p>
+        </div>
       </main>
     )
   }
@@ -99,10 +97,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
     const slotMin = h * 60 + m
     const endMin = slotMin + duration
     const endTime = `${Math.floor(endMin / 60).toString().padStart(2, '0')}:${(endMin % 60).toString().padStart(2, '0')}`
-
-    // ✅ ใช้ minBookableTime (ปัจจุบัน + 1 ชม.) แทนเวลาปัจจุบัน
     const isTooSoon = isToday && slotMin < minBookableTime
-
     const overlap = bookings?.filter(b =>
       time < String(b.end_time).slice(0, 5) && endTime > String(b.start_time).slice(0, 5)
     ).length ?? 0
@@ -115,21 +110,25 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
   })
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="bg-white border-b sticky top-0 z-10">
+    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-100 sticky top-0 z-10 backdrop-blur-lg bg-white/80">
         <div className="flex items-center gap-3 px-4 py-4">
-          <Link href={`/branch/${branchId}`} className="text-gray-400 text-2xl leading-none">‹</Link>
+          <Link href={`/branch/${branchId}`} className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 active:scale-95 transition-transform">
+            <span className="text-lg leading-none">‹</span>
+          </Link>
           <div>
             <h1 className="font-bold text-gray-900 leading-tight">{service?.name}</h1>
-            <p className="text-xs text-gray-400 mt-0.5">{duration} นาที</p>
+            <p className="text-xs text-gray-400 mt-0.5">⏱ {duration} นาที</p>
           </div>
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-5 space-y-6">
-        <div>
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">เลือกวัน</h2>
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 snap-x">
+      <div className="max-w-lg mx-auto px-4 py-6 space-y-7">
+        {/* Date picker */}
+        <section>
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">เลือกวัน</h2>
+          <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 snap-x scroll-smooth">
             {dates.map(d => {
               const { top, bottom } = formatDateShort(d, today)
               const isSelected = selectedDate === d
@@ -137,30 +136,32 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
                 <SelectableLink key={d}
                   href={`/branch/${branchId}/service/${serviceId}?date=${d}`}
                   className={[
-                    'flex-shrink-0 snap-start flex flex-col items-center justify-center w-16 h-16 rounded-2xl border text-center',
+                    'flex-shrink-0 snap-start flex flex-col items-center justify-center w-18 h-20 rounded-2xl border text-center',
                     isSelected
-                      ? 'bg-gray-900 text-white border-gray-900'
-                      : 'bg-white text-gray-700 border-gray-200',
+                      ? 'bg-gradient-to-br from-gray-900 to-gray-800 text-white border-gray-900 shadow-lg shadow-gray-900/20'
+                      : 'bg-white text-gray-700 border-gray-100 shadow-sm',
                   ].join(' ')}
                 >
-                  <span className="text-xs font-medium">{top}</span>
-                  <span className="text-xs mt-0.5 opacity-70">{bottom}</span>
+                  <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-gray-900'}`}>{top}</span>
+                  <span className={`text-xs mt-1 ${isSelected ? 'text-gray-300' : 'text-gray-500'}`}>{bottom}</span>
                 </SelectableLink>
               )
             })}
           </div>
-        </div>
+        </section>
 
-        <div>
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">เลือกเวลา</h2>
+        {/* Time slots */}
+        <section>
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">เลือกเวลา</h2>
 
           {isClosed ? (
-            <div className="bg-white rounded-2xl border border-gray-200 px-5 py-10 text-center">
-              <div className="text-3xl mb-2">🚫</div>
-              <p className="text-gray-500 text-sm">วันหยุด ไม่รับการจอง</p>
+            <div className="bg-white rounded-3xl border border-gray-100 px-5 py-12 text-center shadow-sm">
+              <div className="text-5xl mb-3">🚫</div>
+              <p className="text-gray-500 text-sm font-medium">วันหยุด ไม่รับการจอง</p>
             </div>
           ) : slots.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-gray-200 px-5 py-10 text-center">
+            <div className="bg-white rounded-3xl border border-gray-100 px-5 py-12 text-center shadow-sm">
+              <div className="text-5xl mb-3">😔</div>
               <p className="text-gray-400 text-sm">ไม่มีเวลาว่าง</p>
             </div>
           ) : (
@@ -169,13 +170,13 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
                 slot.available ? (
                   <SelectableLink key={slot.time}
                     href={`/branch/${branchId}/service/${serviceId}/confirm?time=${slot.time}&date=${selectedDate}`}
-                    className="block bg-white border border-gray-200 rounded-2xl py-4 text-center text-sm font-semibold text-gray-800"
+                    className="block bg-white border border-gray-100 rounded-2xl py-4 text-center text-sm font-bold text-gray-800 shadow-sm"
                   >
                     {slot.time}
                   </SelectableLink>
                 ) : (
                   <div key={slot.time}
-                    className="bg-gray-100 border border-gray-100 rounded-2xl py-4 text-center text-sm font-medium text-gray-300 opacity-60 pointer-events-none"
+                    className="bg-gray-50 border border-gray-50 rounded-2xl py-4 text-center text-sm font-medium text-gray-300 opacity-60 pointer-events-none"
                   >
                     {slot.time}
                   </div>
@@ -183,7 +184,7 @@ export default async function ServiceTimePage({ params, searchParams }: Props) {
               )}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </main>
   )

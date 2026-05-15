@@ -19,18 +19,32 @@ export async function createBooking(formData: FormData) {
   const serviceId   = formData.get('serviceId') as string
   const time        = formData.get('time') as string
   const bookingDate = formData.get('date') as string
-  const name        = (formData.get('name') as string)?.trim()
-  const phone       = (formData.get('phone') as string)?.trim()
+
+  // ✅ อ่าน field keys ที่ส่งมา
+  const fieldKeysRaw   = (formData.get('_field_keys')   as string) ?? ''
+  const fieldLabelsRaw = (formData.get('_field_labels') as string) ?? ''
+  const fieldKeys   = fieldKeysRaw.split(',').filter(Boolean)
+  const fieldLabels = fieldLabelsRaw.split('|')
+
+  // เก็บค่าทุก field ที่ส่งมา
+  const fieldValues: Record<string, string> = {}
+  fieldKeys.forEach(k => {
+    const v = (formData.get(`field_${k}`) as string)?.trim() ?? ''
+    fieldValues[k] = v
+  })
+
+  // ✅ field สำคัญ (system)
+  const name  = fieldValues.name  ?? ''
+  const phone = fieldValues.phone ?? ''
 
   if (!branchId || !serviceId || !time || !bookingDate || !name)
     redirect('/error?message=ข้อมูลไม่ครบถ้วน')
-  if (!/^\d{10}$/.test(phone))
+  if (phone && !/^\d{10}$/.test(phone))
     redirect('/error?message=เบอร์โทรต้อง 10 หลัก')
 
   const session = await getLineSession()
   const lineUserId = session?.lineUserId ?? null
 
-  // ✅ Optimize: รัน 3 queries พร้อมกัน
   const [
     { data: service },
     { data: branch },
@@ -59,12 +73,10 @@ export async function createBooking(formData: FormData) {
   if (branch.booking_mode === 'capacity' && overlapping >= branch.max_parallel_bookings)
     redirect('/error?message=เวลานี้เต็มแล้ว')
 
-  // ✅ Customer upsert logic:
-  // 1) ถ้ามี lineUserId → หาจาก line_user_id ก่อน (ถ้าเจอ = ลูกค้าคนนี้แน่นอน)
-  //    → update ชื่อ+เบอร์เสมอ ไม่ insert ใหม่
-  // 2) ถ้าไม่มี lineUserId หรือหาไม่เจอ → หาจากเบอร์
-  //    → ถ้าเจอ update + ผูก line_user_id เข้าไป
-  // 3) ถ้ายังไม่เจอ → insert ใหม่
+  // ===========================================
+  // Customer upsert — ยึด line_user_id เป็นหลัก
+  // ถ้ามี line_user_id ใน DB แล้ว → UPDATE ชื่อ+เบอร์เสมอ ไม่ INSERT ใหม่
+  // ===========================================
   let customer: any = null
 
   if (lineUserId) {
@@ -77,28 +89,27 @@ export async function createBooking(formData: FormData) {
   }
 
   if (customer) {
-    // มี line_user_id ในระบบแล้ว → update ชื่อ+เบอร์เสมอ
+    // มี line_user_id ในระบบแล้ว → UPDATE ชื่อ+เบอร์เสมอ
     await supabase.from('customers').update({
-      name,
-      phone,
+      name, phone,
       updated_at: new Date().toISOString(),
     }).eq('id', customer.id)
   } else {
-    // ไม่เจอจาก LINE → หาจากเบอร์
-    const { data: byPhone } = await supabase
-      .from('customers').select('id, line_user_id')
-      .eq('shop_id', branch.shop_id)
-      .eq('phone', phone)
-      .maybeSingle()
-
-    if (byPhone) {
-      // เจอจากเบอร์ → update ชื่อ + ผูก line_user_id (ถ้ามี)
-      const updates: any = { name, updated_at: new Date().toISOString() }
-      if (lineUserId && !byPhone.line_user_id) updates.line_user_id = lineUserId
-      await supabase.from('customers').update(updates).eq('id', byPhone.id)
-      customer = byPhone
-    } else {
-      // ไม่เจอเลย → insert ใหม่
+    // ไม่เจอจาก LINE → หาจากเบอร์ (ถ้ามี)
+    if (phone) {
+      const { data: byPhone } = await supabase
+        .from('customers').select('id, line_user_id')
+        .eq('shop_id', branch.shop_id)
+        .eq('phone', phone)
+        .maybeSingle()
+      if (byPhone) {
+        const updates: any = { name, updated_at: new Date().toISOString() }
+        if (lineUserId && !byPhone.line_user_id) updates.line_user_id = lineUserId
+        await supabase.from('customers').update(updates).eq('id', byPhone.id)
+        customer = byPhone
+      }
+    }
+    if (!customer) {
       const { data: newC, error: cErr } = await supabase
         .from('customers')
         .insert({ shop_id: branch.shop_id, name, phone, line_user_id: lineUserId })
@@ -126,11 +137,27 @@ export async function createBooking(formData: FormData) {
   if (bookingErr || !booking)
     redirect(`/error?message=${encodeURIComponent(bookingErr?.message ?? 'ไม่สามารถสร้าง booking ได้')}`)
 
-  // ✅ Optimize: booking_services insert ไม่ block redirect (ไม่ critical)
-  // ✅ LINE notify ทำหลัง response (ไม่ block ลูกค้า)
   const bookingId = booking.id
   const finalLineUserId = lineUserId ?? customer.line_user_id ?? null
 
+  // ✅ บันทึก booking_details — field ที่ไม่ใช่ system (ไม่ใช่ name/phone)
+  const detailRows: { booking_id: string; field_key: string; field_label: string; value: string }[] = []
+  fieldKeys.forEach((k, i) => {
+    if (k === 'name' || k === 'phone') return  // skip system fields
+    const v = fieldValues[k]
+    if (!v) return
+    detailRows.push({
+      booking_id: bookingId,
+      field_key:  k,
+      field_label: fieldLabels[i] ?? k,
+      value: v,
+    })
+  })
+
+  // เตรียม details array สำหรับ Flex Message
+  const detailsForFlex = detailRows.map(r => ({ label: r.field_label, value: r.value }))
+
+  // ✅ insert booking_services + booking_details + notify หลัง response
   after(async () => {
     await Promise.allSettled([
       supabase.from('booking_services').insert({
@@ -139,6 +166,9 @@ export async function createBooking(formData: FormData) {
         duration_minutes: service.duration_minutes,
         price:            service.price,
       }),
+      detailRows.length > 0
+        ? supabase.from('booking_details').insert(detailRows)
+        : Promise.resolve(),
       fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/line/notify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -155,6 +185,7 @@ export async function createBooking(formData: FormData) {
             date:         bookingDate,
             time,
             price:        service.price,
+            details:      detailsForFlex,
           },
         }),
       }).catch(err => console.error('LINE notify failed:', err)),

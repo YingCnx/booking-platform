@@ -31,11 +31,17 @@ export async function PATCH(req: Request) {
     `)
     .eq('id', bookingId).single()
 
-  // ✅ ส่ง LINE แจ้งลูกค้าเมื่อ confirmed ด้วย credentials ของร้านนั้น
   if (status === 'confirmed' && booking) {
     const customer = booking.customers as any
     const service  = booking.services  as any
     const branch   = booking.branches  as any
+
+    // ✅ ดึง booking_details
+    const { data: details } = await supabase
+      .from('booking_details')
+      .select('field_label, value')
+      .eq('booking_id', bookingId)
+    const detailsForFlex = (details ?? []).map(d => ({ label: d.field_label, value: d.value }))
 
     if (customer?.line_user_id && branch?.shop_id) {
       try {
@@ -44,7 +50,7 @@ export async function PATCH(req: Request) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'booking_confirmed',
-            shopId: branch.shop_id,   // ✅ ส่ง shopId ให้ notify ดึง credentials ถูกร้าน
+            shopId: branch.shop_id,
             data: {
               lineUserId:   customer.line_user_id,
               customerName: customer.name,
@@ -53,6 +59,7 @@ export async function PATCH(req: Request) {
               date:         booking.booking_date,
               time:         String(booking.start_time).slice(0, 5),
               price:        service?.price ?? booking.total_price,
+              details:      detailsForFlex,
             },
           }),
         })
