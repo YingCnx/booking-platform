@@ -1,0 +1,58 @@
+import { NextResponse } from 'next/server'
+import { createClient } from '@/utils/supabase/server'
+import { getShopLineCredentials, pushMessage } from '@/lib/line'
+import { getAdminSession } from '@/lib/admin-session'
+
+export async function POST(req: Request) {
+  const admin = await getAdminSession()
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { bookingId, message } = await req.json()
+
+  if (!bookingId || !message?.trim()) {
+    return NextResponse.json({ error: 'bookingId และ message required' }, { status: 400 })
+  }
+
+  const supabase = await createClient()
+
+  const { data: booking } = await supabase
+    .from('bookings')
+    .select(`
+      id,
+      customers ( line_user_id, name ),
+      branches ( shop_id )
+    `)
+    .eq('id', bookingId)
+    .single()
+
+  if (!booking) {
+    return NextResponse.json({ error: 'ไม่พบ booking' }, { status: 404 })
+  }
+
+  const customer = booking.customers as any
+  const branch   = booking.branches  as any
+
+  // ✅ booking ต้องเป็นของ shop ของ admin
+  if (branch?.shop_id !== admin.shopId) {
+    return NextResponse.json({ error: 'ไม่อนุญาต' }, { status: 403 })
+  }
+
+  if (!customer?.line_user_id) {
+    return NextResponse.json({ error: 'ลูกค้าไม่ได้ผูก LINE' }, { status: 400 })
+  }
+
+  const creds = await getShopLineCredentials(branch.shop_id)
+  if (!creds.accessToken) {
+    return NextResponse.json({ error: 'ร้านยังไม่ได้ตั้งค่า LINE' }, { status: 400 })
+  }
+
+  const ok = await pushMessage(
+    customer.line_user_id,
+    [{ type: 'text', text: message.trim() }],
+    creds.accessToken,
+  )
+
+  if (!ok) return NextResponse.json({ error: 'ส่งข้อความไม่สำเร็จ' }, { status: 500 })
+
+  return NextResponse.json({ ok: true, customerName: customer.name })
+}
